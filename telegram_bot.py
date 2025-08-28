@@ -1092,8 +1092,8 @@ class TelegramBot:
         elif query.data == 'how_to_use':
             how_to_use_message = (
                 "📖 *Botu Nasıl Kullanırım?*\n\n"
-                "👾 V.VV SUNAR HACKER V3.0 ile Instagram hesaplarını test etmek çok kolay! 🔥\n"
-                "⚠️ *Yasal Uyarı*: Bu botu sadece kendi hesabın veya izinli testler için kullan! Yasadışı kullanım seni başını belaya sokar, kankam! 😎\n\n"
+                "👾 V.VV SUNAR HACKER V3.0 ile Instagram hesaplarını kırmak çok kolay! 🔥\n"
+                "⚠️ *Yasal Uyarı*: Bu botu sadece kendi hesabın veya izinli testler için kullan! hahah şska be ne yapıyorsan yap senin sorunun! 😎\n\n"
                 "*Adım Adım Kullanım:*\n"
                 "1. *Kullanıcı Adı Gir* 🎯: Hedef Instagram kullanıcı adını yaz.\n"
                 "2. *Şifre Listesi Yükle veya Oluştur* 📜🔑:\n"
@@ -1278,3 +1278,4 @@ if __name__ == "__main__":
     import nest_asyncio
     nest_asyncio.apply()
     asyncio.run(main())
+
