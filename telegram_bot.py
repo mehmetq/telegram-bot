@@ -570,13 +570,8 @@ class TelegramBot:
         self.brute_force_tasks = {}
         self.password_generator = PasswordGenerator()
 
-    async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        user_id = update.effective_user.id
-        await update.message.reply_text("🔒 Lütfen bot şifresini girin:")
-        context.user_data['awaiting'] = 'password'
-
-    async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        user_id = update.effective_user.id
+    def _initialize_user_data(self, user_id: int):
+        """Kullanıcı verisini başlatır."""
         if user_id not in self.user_data:
             self.user_data[user_id] = {
                 'username': None,
@@ -589,6 +584,16 @@ class TelegramBot:
                     'leetmode': False, 'spechars': False, 'randnum': False
                 }
             }
+
+    async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user_id = update.effective_user.id
+        self._initialize_user_data(user_id)  # Her zaman kullanıcı verisini başlat
+        await update.message.reply_text("🔒 Lütfen bot şifresini girin:")
+        context.user_data['awaiting'] = 'password'
+
+    async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        user_id = update.effective_user.id
+        self._initialize_user_data(user_id)  # Kullanıcı verisini kontrol et ve başlat
 
         awaiting = context.user_data.get('awaiting')
         if not awaiting:
@@ -709,6 +714,9 @@ class TelegramBot:
         await query.answer()
         user_id = query.from_user.id
 
+        # Kullanıcı verisini kontrol et ve başlat
+        self._initialize_user_data(user_id)
+
         if query.data == 'set_username':
             await query.message.reply_text("🎯 Lütfen Instagram kullanıcı adını gir:")
             context.user_data['awaiting'] = 'username'
@@ -764,6 +772,8 @@ class TelegramBot:
             await self.generate_password_file(query, user_id)
         elif query.data == 'start_attack':
             await self.start_attack(update, context)
+        else:
+            await query.message.reply_text("❌ Geçersiz işlem! Lütfen /start ile yeniden başla.")
 
     async def generate_password_file(self, query: Update, user_id: int):
         profile = self.user_data[user_id]['password_profile']
@@ -851,6 +861,14 @@ class TelegramBot:
         finally:
             if user_id in self.brute_force_tasks:
                 del self.brute_force_tasks[user_id]
+            # Dosya temizliği
+            for file_path in [self.user_data[user_id]['password_file'], self.user_data[user_id]['proxy_file']]:
+                if file_path and os.path.exists(file_path):
+                    try:
+                        os.remove(file_path)
+                        await query.message.reply_text(f"🗑️ Dosya silindi: {file_path}")
+                    except Exception as e:
+                        logger.error(f"Dosya silme hatası: {file_path}, {str(e)}")
 
 async def main():
     bot = TelegramBot()
