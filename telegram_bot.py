@@ -7,7 +7,7 @@ import re
 import requests
 import itertools
 from typing import List, Optional
-from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputFile
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -559,8 +559,11 @@ class InstagramBruteForce:
             await progress_callback(f"⏳ {delay:.1f}s bekleniyor...")
             await asyncio.sleep(delay)
 
+        # İşlem sonu rapor
+        report = f"📊 Rapor:\n- Denenen şifre sayısı: {tried_passwords}/{total_passwords}\n"
         if potential_passwords:
-            await progress_callback(f"🔍 Hata alan şifreler (doğru olabilir, kontrol et): {', '.join(potential_passwords)}")
+            report += f"- Kullanıcı adı doğru ama hata alınan şifreler (doğru olabilir, manuel olarak kontrol et): {', '.join(potential_passwords)}\n"
+        await progress_callback(report)
         await progress_callback(f"⏰ Timeout ({timeout}s) aşıldı veya tüm şifreler denendi! Denenen şifre: {tried_passwords}/{total_passwords}")
         return None
 
@@ -571,7 +574,6 @@ class TelegramBot:
         self.password_generator = PasswordGenerator()
 
     def _initialize_user_data(self, user_id: int):
-        """Kullanıcı verisini başlatır."""
         if user_id not in self.user_data:
             self.user_data[user_id] = {
                 'username': None,
@@ -587,13 +589,13 @@ class TelegramBot:
 
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = update.effective_user.id
-        self._initialize_user_data(user_id)  # Her zaman kullanıcı verisini başlat
+        self._initialize_user_data(user_id)
         await update.message.reply_text("🔒 Lütfen bot şifresini girin:")
         context.user_data['awaiting'] = 'password'
 
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = update.effective_user.id
-        self._initialize_user_data(user_id)  # Kullanıcı verisini kontrol et ve başlat
+        self._initialize_user_data(user_id)
 
         awaiting = context.user_data.get('awaiting')
         if not awaiting:
@@ -714,7 +716,6 @@ class TelegramBot:
         await query.answer()
         user_id = query.from_user.id
 
-        # Kullanıcı verisini kontrol et ve başlat
         self._initialize_user_data(user_id)
 
         if query.data == 'set_username':
@@ -782,7 +783,8 @@ class TelegramBot:
         with open(file_path, 'w', encoding='utf-8') as f:
             f.write('\n'.join(wordlist))
         self.user_data[user_id]['password_file'] = file_path
-        await query.message.reply_text(f"✅ Şifre listesi oluşturuldu! {len(wordlist)} şifre kaydedildi: {file_path}")
+        await query.message.reply_text(f"✅ Şifre listesi oluşturuldu! {len(wordlist)} şifre kaydedildi.")
+        await query.message.reply_document(document=InputFile(file_path, filename='generated_passwords.txt'))
         keyboard = [
             [InlineKeyboardButton("🎯 Kullanıcı Adı Gir", callback_data='set_username')],
             [InlineKeyboardButton("📜 Şifre Listesi Yükle", callback_data='set_password_file')],
@@ -861,14 +863,6 @@ class TelegramBot:
         finally:
             if user_id in self.brute_force_tasks:
                 del self.brute_force_tasks[user_id]
-            # Dosya temizliği
-            for file_path in [self.user_data[user_id]['password_file'], self.user_data[user_id]['proxy_file']]:
-                if file_path and os.path.exists(file_path):
-                    try:
-                        os.remove(file_path)
-                        await query.message.reply_text(f"🗑️ Dosya silindi: {file_path}")
-                    except Exception as e:
-                        logger.error(f"Dosya silme hatası: {file_path}, {str(e)}")
 
 async def main():
     bot = TelegramBot()
