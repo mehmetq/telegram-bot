@@ -405,8 +405,36 @@ class TelegramBot:
         # ... (Önceki button implementasyonu)
 
     async def generate_password_file(self, query: Update, user_id: int):
-        # Şifre dosyası oluşturma (önceki kodun aynısı)
-        # ... (Önceki generate_password_file implementasyonu)
+        try:
+            # Kullanıcı profilini al
+            profile = self.user_data[user_id]['password_profile']
+            if not any([profile['firstname'], profile['lastname'], profile['birthdate'], 
+                        profile['pet'], profile['company'], profile['keywords']]):
+                await query.message.reply_text("❌ Lütfen önce profil bilgilerini girin!")
+                return
+
+            # Şifre listesini oluştur
+            wordlist = self.password_generator.generate_wordlist(profile)
+            if not wordlist:
+                await query.message.reply_text("❌ Şifre listesi oluşturulamadı, profil bilgileri yetersiz!")
+                return
+            
+            # Şifre listesini dosyaya kaydet
+            password_file = f"wordlist_{user_id}.txt"
+            with open(password_file, 'w', encoding='utf-8') as f:
+                for word in wordlist:
+                    f.write(word + '\n')
+            
+            self.user_data[user_id]['password_file'] = password_file
+            await query.message.reply_text(f"✅ Şifre listesi oluşturuldu: {len(wordlist)} şifre")
+            
+            # Dosyayı Telegram üzerinden gönder
+            with open(password_file, 'rb') as f:
+                await query.message.reply_document(document=InputFile(f, filename=f"wordlist_{user_id}.txt"))
+        
+        except Exception as e:
+            logger.error(f"Şifre listesi oluşturma hatası: {str(e)}")
+            await query.message.reply_text(f"❌ Şifre listesi oluşturulamadı: {str(e)}")
 
     async def start_attack(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = update.effective_user.id
