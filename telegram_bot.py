@@ -5,6 +5,7 @@ import time
 import json
 import re
 import requests
+import itertools
 from typing import List, Optional
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputFile
 from telegram.ext import (
