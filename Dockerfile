@@ -10,18 +10,20 @@ RUN apt-get update && apt-get install -y \
     unzip \
     && rm -rf /var/lib/apt/lists/*
 
-# Chrome için GPG key'i ekle ve Chrome kaynaklarını ayarla
+# Chrome GPG key ve repo ekle
 RUN mkdir -p /etc/apt/keyrings \
     && wget -q -O /etc/apt/keyrings/google-chrome.gpg https://dl.google.com/linux/linux_signing_key.pub \
     && echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/google-chrome.gpg] http://dl.google.com/linux/chrome/deb/ stable main" > /etc/apt/sources.list.d/google-chrome.list
 
-# Chrome'un belirli bir sürümünü yükle (118 sürümü sabit)
+# Google Chrome (son sürüm) yükle
 RUN apt-get update \
-    && apt-get install -y google-chrome-stable=118.0.5993.70-1 \
+    && apt-get install -y google-chrome-stable \
     && rm -rf /var/lib/apt/lists/*
 
-# Chromedriver (118 sürümü) indir ve kur
-RUN wget -O /tmp/chromedriver.zip https://chromedriver.storage.googleapis.com/118.0.5993.70/chromedriver_linux64.zip \
+# Uyumlu Chromedriver indir (Chrome for Testing API ile)
+RUN CHROME_VERSION=$(google-chrome --version | awk '{print $3}') \
+    && CHROME_DRIVER_VERSION=$(curl -s https://googlechromelabs.github.io/chrome-for-testing/LATEST_RELEASE_STABLE) \
+    && wget -O /tmp/chromedriver.zip "https://edgedl.me.gvt1.com/edgedl/chrome/chrome-for-testing/${CHROME_DRIVER_VERSION}/linux64/chromedriver-linux64.zip" \
     && unzip /tmp/chromedriver.zip -d /usr/bin/ \
     && rm /tmp/chromedriver.zip \
     && chmod +x /usr/bin/chromedriver
