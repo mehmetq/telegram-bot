@@ -38,7 +38,7 @@ logger = logging.getLogger(__name__)
 TOKEN = os.getenv("BOT_TOKEN", "6481633238:AAHMT8V8nHNUsQUm69F1ngczdiFTzJAQJfU")
 
 # Güvenlik şifresi
-BOT_PASSWORD = os.getenv("BOT_PASSWORD", "vio1911")
+BOT_PASSWORD = os.getenv("BOT_PASSWORD", "1453")
 
 # Ücretsiz proxy API'leri
 PROXY_APIS = [
@@ -793,3 +793,4 @@ def main():
 
 if __name__ == '__main__':
     main()
+
