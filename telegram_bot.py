@@ -1,6 +1,6 @@
 import sqlite3
 import random
-from datetime import datetime, time
+from datetime import datetime, timedelta
 
 from telegram import (
     Update,
@@ -14,48 +14,37 @@ from telegram.ext import (
     ContextTypes
 )
 
-# ================== AYARLAR ==================
-
+# ================== TOKEN ==================
 TOKEN = "8492081360:AAFYWijP2qJf_-QkCeO36pyVP7xhzhM2af0"
 
-# ================== MOTİVASYON METİNLERİ ==================
-
+# ================== METİNLER ==================
 MOTIVE_SOZLER = [
-    "Yavaş ol… kontrol sende 😏",
+    "Yavaş ol. Kontrol sende.",
     "Acele eden kaybeder.",
     "Bugün refleks değil, sen varsın.",
-    "Nefesi yavaşlat. Patron sensin.",
-    "Kontrol = güç. Güç çekicidir.",
-    "Bugün bedenine hükmeden adamsın."
+    "Nefes yavaş, beden sakin.",
+    "Kontrol güçtür."
 ]
 
-SABAH_SOZLERI = [
-    "🌅 Günaydın\nBugün acele yok.\nBugün kontrol var 😏",
-    "Uyan.\nYavaş olan kazanır.",
-    "Bugün disiplin günü.",
-    "Hazırsan güç sende."
-]
-
-# ================== 21 GÜNLÜK PLAN ==================
-
+# ================== PLAN ==================
 PLAN = {
-    1:  {"sure":5,  "tur":2,   "durma":"20 sn"},
-    3:  {"sure":6,  "tur":2,   "durma":"20–25 sn"},
-    5:  {"sure":7,  "tur":3,   "durma":"25 sn"},
-    7:  {"sure":8,  "tur":3,   "durma":"25–30 sn"},
-    9:  {"sure":9,  "tur":3,   "durma":"30 sn"},
-    11: {"sure":10, "tur":"3–4","durma":"30 sn"},
-    13: {"sure":11, "tur":4,   "durma":"30–35 sn"},
-    15: {"sure":12, "tur":4,   "durma":"35 sn"},
-    17: {"sure":13, "tur":4,   "durma":"35–40 sn"},
-    19: {"sure":14, "tur":"4–5","durma":"40 sn"},
-    21: {"sure":15, "tur":5,   "durma":"40 sn"},
+    1:  {"sure":5,  "durma":"20 saniye"},
+    3:  {"sure":6,  "durma":"20–25 saniye"},
+    5:  {"sure":7,  "durma":"25 saniye"},
+    7:  {"sure":8,  "durma":"25–30 saniye"},
+    9:  {"sure":9,  "durma":"30 saniye"},
+    11: {"sure":10, "durma":"30 saniye"},
+    13: {"sure":11, "durma":"30–35 saniye"},
+    15: {"sure":12, "durma":"35 saniye"},
+    17: {"sure":13, "durma":"35–40 saniye"},
+    19: {"sure":14, "durma":"40 saniye"},
+    21: {"sure":15, "durma":"40 saniye"},
 }
 
 # ================== DATABASE ==================
-
 conn = sqlite3.connect("progress.db", check_same_thread=False)
 cur = conn.cursor()
+
 cur.execute("""
 CREATE TABLE IF NOT EXISTS users (
     chat_id INTEGER PRIMARY KEY,
@@ -64,172 +53,191 @@ CREATE TABLE IF NOT EXISTS users (
 """)
 conn.commit()
 
-# ================== YARDIMCILAR ==================
+# --- MIGRATION ---
+try:
+    cur.execute("ALTER TABLE users ADD COLUMN timer_start TEXT")
+except:
+    pass
 
+try:
+    cur.execute("ALTER TABLE users ADD COLUMN target_minutes INTEGER")
+except:
+    pass
+
+conn.commit()
+
+# ================== DB HELPERS ==================
 def get_user(chat_id):
-    cur.execute("SELECT current_day FROM users WHERE chat_id=?", (chat_id,))
-    row = cur.fetchone()
-    return row[0] if row else None
+    cur.execute("SELECT * FROM users WHERE chat_id=?", (chat_id,))
+    return cur.fetchone()
 
 def create_user(chat_id):
-    cur.execute("INSERT INTO users VALUES (?,?)", (chat_id, 1))
+    cur.execute(
+        "INSERT INTO users (chat_id, current_day, timer_start, target_minutes) VALUES (?,?,?,?)",
+        (chat_id, 1, None, None)
+    )
     conn.commit()
 
 def advance_day(chat_id):
-    cur.execute(
-        "UPDATE users SET current_day = current_day + 1 WHERE chat_id=?",
-        (chat_id,)
-    )
+    cur.execute("""
+        UPDATE users
+        SET current_day = current_day + 1,
+            timer_start = NULL,
+            target_minutes = NULL
+        WHERE chat_id=?
+    """, (chat_id,))
     conn.commit()
 
-def gunluk_mesaj(day, p):
-    return f"""
-━━━━━━━━━━━━━━━━
-🔥  START–STOP GÜNÜ
-━━━━━━━━━━━━━━━━
-
-📅 Gün: {day} / 21
-
-⏱ Süre
-• {p['sure']} dakika
-
-🔁 Kontrol
-• {p['tur']} tur
-
-⏸ Dur
-• {p['durma']}
-
-🫁 Tempo
-• Yavaş
-• Nefes derin
-
-🚫 Porno
-• Yasak
-
-━━━━━━━━━━━━━━━━
-😏 Bugün mesajın:
-“{random.choice(MOTIVE_SOZLER)}”
-━━━━━━━━━━━━━━━━
-
-👇 Bitince seç
-"""
-
-def dinlenme_mesaji(day):
-    return f"""
-━━━━━━━━━━━━━━━━
-🧘‍♂️ DİNLENME GÜNÜ
-━━━━━━━━━━━━━━━━
-
-📅 Gün: {day} / 21
-
-Bugün çalışma yok.
-Vücudu rahat bırak.
-
-😌
-“Zorlama yok, istikrar var.”
-━━━━━━━━━━━━━━━━
-"""
-
-# ================== KOMUTLAR ==================
-
+# ================== START ==================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
-    if get_user(chat_id) is None:
+    if not get_user(chat_id):
         create_user(chat_id)
 
     await update.message.reply_text(
-        "🔥 START–STOP BOT AKTİF 🔥\n\n"
-        "• Pornosuz\n"
-        "• Acele yok\n"
-        "• Kontrol öğreniyoruz\n\n"
-        "Hazırsan /bugun yaz 😏"
+        "🔥 Start–Stop Bot Aktif\n\n"
+        "Bugünkü görevi görmek için:\n"
+        "/bugun"
     )
 
+# ================== BUGÜN ==================
 async def bugun(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
-    day = get_user(chat_id)
-
-    if day is None:
-        await start(update, context)
-        return
+    user = get_user(chat_id)
+    day = user[1]
 
     if day > 21:
         await update.message.reply_text(
-            "🎉 21 GÜN TAMAMLANDI 🎉\n\n"
-            "Kontrol artık sende.\n"
-            "Bu refleks senin."
+            "🎉 21 gün tamamlandı.\nKontrol artık sende."
         )
         return
 
+    if day not in PLAN:
+        advance_day(chat_id)
+        await update.message.reply_text(
+            "🧘‍♂️ Bugün dinlenme günü.\nYarın devam."
+        )
+        return
+
+    sure = PLAN[day]["sure"]
+    durma = PLAN[day]["durma"]
+
     keyboard = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("✅ Yaptım", callback_data="yaptim"),
-            InlineKeyboardButton("⏭ Geç", callback_data="yapmadim")
-        ],
-        [
-            InlineKeyboardButton("🔥 Gaz ver", callback_data="motive")
-        ]
+        [InlineKeyboardButton("▶️ Zamanı Başlat", callback_data=f"basla_{sure}")]
     ])
 
-    if day in PLAN:
-        text = gunluk_mesaj(day, PLAN[day])
-    else:
-        text = dinlenme_mesaji(day)
+    await update.message.reply_text(
+        f"""
+━━━━━━━━━━━━━━━━
+🔥 START–STOP GÜNÜ
+━━━━━━━━━━━━━━━━
 
-    await update.message.reply_text(text, reply_markup=keyboard)
+📅 Gün: {day} / 21
+⏱ Toplam süre: {sure} dakika
 
-# ================== BUTONLAR ==================
+🧠 Ne yapacaksın?
+1️⃣ Yavaşça uyarılmayı başlat  
+2️⃣ Yaklaşınca TAMAMEN DUR  
+3️⃣ {durma} bekle  
+4️⃣ Nefesini yavaşlat  
+5️⃣ Tekrar devam et  
+6️⃣ Süre bitene kadar döngüyü sürdür  
 
+🚫 Porno yok
+🫁 Acele yok
+
+“{random.choice(MOTIVE_SOZLER)}”
+
+Hazırsan başlat 👇
+""",
+        reply_markup=keyboard
+    )
+
+# ================== BUTTON HANDLER ==================
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     chat_id = query.message.chat.id
 
-    if query.data == "yaptim":
-        advance_day(chat_id)
+    # ▶️ BAŞLAT
+    if query.data.startswith("basla"):
+        sure = int(query.data.split("_")[1])
+        start_time = datetime.now()
+
+        cur.execute("""
+            UPDATE users
+            SET timer_start=?, target_minutes=?
+            WHERE chat_id=?
+        """, (start_time.isoformat(), sure, chat_id))
+        conn.commit()
+
         await query.edit_message_text(
-            "✅ Not alındı.\n"
-            "Disiplin çekicidir 😏\n"
-            "Yarın devam."
+            f"▶️ Sayaç başladı.\n"
+            f"{sure} dakika boyunca çalışacak.\n\n"
+            "Acele yok. Nefes yavaş."
         )
 
-    elif query.data == "yapmadim":
-        advance_day(chat_id)
-        await query.edit_message_text(
-            "⏭ Bugün geçildi.\n"
-            "Sorun yok.\n"
-            "Yarın devam."
-        )
-
-    elif query.data == "motive":
-        await query.answer(
-            random.choice(MOTIVE_SOZLER),
-            show_alert=True
-        )
-
-# ================== SABAH MESAJI ==================
-
-async def sabah_job(context: ContextTypes.DEFAULT_TYPE):
-    cur.execute("SELECT chat_id FROM users")
-    for (chat_id,) in cur.fetchall():
-        await context.bot.send_message(
+        context.job_queue.run_once(
+            timer_bitti,
+            when=timedelta(minutes=sure),
             chat_id=chat_id,
-            text=random.choice(SABAH_SOZLERI)
+            name=f"timer_{chat_id}"
         )
+
+    # ⏹ BİTİR
+    elif query.data == "bitir":
+        user = get_user(chat_id)
+        start_time = datetime.fromisoformat(user[2])
+        elapsed = int((datetime.now() - start_time).total_seconds() / 60)
+
+        advance_day(chat_id)
+
+        await query.edit_message_text(
+            f"""
+⏹ GÜN TAMAMLANDI
+
+⏱ Geçen süre:
+{elapsed} dakika
+
+Bugün kontrol sendeydi.
+"""
+        )
+
+# ================== TIMER BİTTİ ==================
+async def timer_bitti(context: ContextTypes.DEFAULT_TYPE):
+    chat_id = context.job.chat_id
+    user = get_user(chat_id)
+
+    if not user or not user[2]:
+        return
+
+    start_time = datetime.fromisoformat(user[2])
+    elapsed = int((datetime.now() - start_time).total_seconds() / 60)
+
+    await context.bot.send_message(
+        chat_id=chat_id,
+        text=
+        f"""
+⏰ SÜRE BİTTİ
+
+⏱ Toplam süre:
+{elapsed} dakika
+
+Yavaşça bırak.
+Hazırsan bitir 👇
+""",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("⏹ Bitir", callback_data="bitir")]
+        ])
+    )
 
 # ================== MAIN ==================
-
 def main():
     app = ApplicationBuilder().token(TOKEN).build()
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("bugun", bugun))
     app.add_handler(CallbackQueryHandler(button_handler))
-
-    app.job_queue.run_daily(
-        sabah_job,
-        time=time(hour=9, minute=0)
-    )
 
     app.run_polling()
 
