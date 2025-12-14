@@ -1,8 +1,1 @@
 python-telegram-bot==20.7
-selenium==4.15.2
-requests==2.31.0
-urllib3==2.0.7
-beautifulsoup4==4.12.2
-lxml==4.9.3
-webdriver-manager==4.0.1
-pyvirtualdisplay==3.0
