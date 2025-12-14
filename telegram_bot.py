@@ -1,6 +1,8 @@
 import sqlite3
 import random
 from datetime import datetime, timedelta
+import logging
+import os
 
 from telegram import (
     Update,
@@ -11,11 +13,15 @@ from telegram.ext import (
     ApplicationBuilder,
     CommandHandler,
     CallbackQueryHandler,
-    ContextTypes
+    ContextTypes,
+    JobQueue
 )
 
 # ================== TOKEN ==================
-TOKEN = "8492081360:AAFYWijP2qJf_-QkCeO36pyVP7xhzhM2af0"
+TOKEN = os.getenv("8492081360:AAFYWijP2qJf_-QkCeO36pyVP7xhzhM2af0")  # Railway için şart
+
+# ================== LOG ==================
+logging.basicConfig(level=logging.INFO)
 
 # ================== METİNLER ==================
 MOTIVE_SOZLER = [
@@ -48,22 +54,11 @@ cur = conn.cursor()
 cur.execute("""
 CREATE TABLE IF NOT EXISTS users (
     chat_id INTEGER PRIMARY KEY,
-    current_day INTEGER
+    current_day INTEGER,
+    timer_start TEXT,
+    target_minutes INTEGER
 )
 """)
-conn.commit()
-
-# --- MIGRATION ---
-try:
-    cur.execute("ALTER TABLE users ADD COLUMN timer_start TEXT")
-except:
-    pass
-
-try:
-    cur.execute("ALTER TABLE users ADD COLUMN target_minutes INTEGER")
-except:
-    pass
-
 conn.commit()
 
 # ================== DB HELPERS ==================
@@ -73,7 +68,7 @@ def get_user(chat_id):
 
 def create_user(chat_id):
     cur.execute(
-        "INSERT INTO users (chat_id, current_day, timer_start, target_minutes) VALUES (?,?,?,?)",
+        "INSERT INTO users VALUES (?,?,?,?)",
         (chat_id, 1, None, None)
     )
     conn.commit()
@@ -96,7 +91,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await update.message.reply_text(
         "🔥 Start–Stop Bot Aktif\n\n"
-        "Bugünkü görevi görmek için:\n"
+        "Bugünkü görev için:\n"
         "/bugun"
     )
 
@@ -107,16 +102,12 @@ async def bugun(update: Update, context: ContextTypes.DEFAULT_TYPE):
     day = user[1]
 
     if day > 21:
-        await update.message.reply_text(
-            "🎉 21 gün tamamlandı.\nKontrol artık sende."
-        )
+        await update.message.reply_text("🎉 21 gün tamamlandı.")
         return
 
     if day not in PLAN:
         advance_day(chat_id)
-        await update.message.reply_text(
-            "🧘‍♂️ Bugün dinlenme günü.\nYarın devam."
-        )
+        await update.message.reply_text("🧘 Bugün dinlenme günü.")
         return
 
     sure = PLAN[day]["sure"]
@@ -129,37 +120,29 @@ async def bugun(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         f"""
 ━━━━━━━━━━━━━━━━
-🔥 START–STOP GÜNÜ
+🔥 START–STOP
 ━━━━━━━━━━━━━━━━
 
-📅 Gün: {day} / 21
-⏱ Toplam süre: {sure} dakika
+📅 Gün: {day}/21
+⏱ Süre: {sure} dakika
 
-🧠 Ne yapacaksın?
-1️⃣ Yavaşça uyarılmayı başlat  
-2️⃣ Yaklaşınca TAMAMEN DUR  
-3️⃣ {durma} bekle  
-4️⃣ Nefesini yavaşlat  
-5️⃣ Tekrar devam et  
-6️⃣ Süre bitene kadar döngüyü sürdür  
-
-🚫 Porno yok
-🫁 Acele yok
+🛑 Yaklaş → DUR  
+⏳ {durma} bekle  
+🫁 Nefesi yavaşlat  
 
 “{random.choice(MOTIVE_SOZLER)}”
 
-Hazırsan başlat 👇
+Hazırsan başla 👇
 """,
         reply_markup=keyboard
     )
 
-# ================== BUTTON HANDLER ==================
+# ================== BUTTON ==================
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     chat_id = query.message.chat.id
 
-    # ▶️ BAŞLAT
     if query.data.startswith("basla"):
         sure = int(query.data.split("_")[1])
         start_time = datetime.now()
@@ -172,11 +155,10 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         conn.commit()
 
         await query.edit_message_text(
-            f"▶️ Sayaç başladı.\n"
-            f"{sure} dakika boyunca çalışacak.\n\n"
-            "Acele yok. Nefes yavaş."
+            f"▶️ Sayaç başladı\n⏱ {sure} dakika\n\nYavaş ol."
         )
 
+        # 🔥 JOBQUEUE GARANTİLİ
         context.job_queue.run_once(
             timer_bitti,
             when=timedelta(minutes=sure),
@@ -184,7 +166,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             name=f"timer_{chat_id}"
         )
 
-    # ⏹ BİTİR
     elif query.data == "bitir":
         user = get_user(chat_id)
         start_time = datetime.fromisoformat(user[2])
@@ -196,36 +177,20 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"""
 ⏹ GÜN TAMAMLANDI
 
-⏱ Geçen süre:
+⏱ Süre:
 {elapsed} dakika
 
-Bugün kontrol sendeydi.
+Kontrol sendeydi.
 """
         )
 
-# ================== TIMER BİTTİ ==================
+# ================== TIMER ==================
 async def timer_bitti(context: ContextTypes.DEFAULT_TYPE):
     chat_id = context.job.chat_id
-    user = get_user(chat_id)
-
-    if not user or not user[2]:
-        return
-
-    start_time = datetime.fromisoformat(user[2])
-    elapsed = int((datetime.now() - start_time).total_seconds() / 60)
 
     await context.bot.send_message(
         chat_id=chat_id,
-        text=
-        f"""
-⏰ SÜRE BİTTİ
-
-⏱ Toplam süre:
-{elapsed} dakika
-
-Yavaşça bırak.
-Hazırsan bitir 👇
-""",
+        text="⏰ Süre bitti.\nHazırsan bitir 👇",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("⏹ Bitir", callback_data="bitir")]
         ])
@@ -233,7 +198,12 @@ Hazırsan bitir 👇
 
 # ================== MAIN ==================
 def main():
-    app = ApplicationBuilder().token(TOKEN).build()
+    app = (
+        ApplicationBuilder()
+        .token(TOKEN)
+        .job_queue(JobQueue())  # 🔥 KRİTİK SATIR
+        .build()
+    )
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("bugun", bugun))
