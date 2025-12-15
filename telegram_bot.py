@@ -14,20 +14,20 @@ from telegram.ext import (
     CommandHandler,
     CallbackQueryHandler,
     ContextTypes,
+    JobQueue
 )
 
 # ================== TOKEN ==================
-TOKEN = os.getenv("8492081360:AAFYWijP2qJf_-QkCeO36pyVP7xhzhM2af0")
+# Önce environment variable'dan dene, yoksa direkt token kullan
+TOKEN = os.getenv("BOT_TOKEN", "8492081360:AAFYWijP2qJf_-QkCeO36pyVP7xhzhM2af0")
+
 if not TOKEN:
-    raise RuntimeError("BOT_TOKEN environment variable is missing")
+    raise RuntimeError("BOT_TOKEN bulunamadı")
 
 # ================== LOG ==================
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    level=logging.INFO
-)
+logging.basicConfig(level=logging.INFO)
 
-# ================== MOTİVASYON ==================
+# ================== METİNLER ==================
 MOTIVE_SOZLER = [
     "Yavaş ol. Kontrol sende.",
     "Acele eden kaybeder.",
@@ -38,17 +38,17 @@ MOTIVE_SOZLER = [
 
 # ================== PLAN ==================
 PLAN = {
-    1:  {"sure": 5,  "durma": "20 saniye"},
-    3:  {"sure": 6,  "durma": "20–25 saniye"},
-    5:  {"sure": 7,  "durma": "25 saniye"},
-    7:  {"sure": 8,  "durma": "25–30 saniye"},
-    9:  {"sure": 9,  "durma": "30 saniye"},
-    11: {"sure": 10, "durma": "30 saniye"},
-    13: {"sure": 11, "durma": "30–35 saniye"},
-    15: {"sure": 12, "durma": "35 saniye"},
-    17: {"sure": 13, "durma": "35–40 saniye"},
-    19: {"sure": 14, "durma": "40 saniye"},
-    21: {"sure": 15, "durma": "40 saniye"},
+    1:  {"sure":5,  "durma":"20 saniye"},
+    3:  {"sure":6,  "durma":"20–25 saniye"},
+    5:  {"sure":7,  "durma":"25 saniye"},
+    7:  {"sure":8,  "durma":"25–30 saniye"},
+    9:  {"sure":9,  "durma":"30 saniye"},
+    11: {"sure":10, "durma":"30 saniye"},
+    13: {"sure":11, "durma":"30–35 saniye"},
+    15: {"sure":12, "durma":"35 saniye"},
+    17: {"sure":13, "durma":"35–40 saniye"},
+    19: {"sure":14, "durma":"40 saniye"},
+    21: {"sure":15, "durma":"40 saniye"},
 }
 
 # ================== DATABASE ==================
@@ -87,64 +87,57 @@ def advance_day(chat_id):
     """, (chat_id,))
     conn.commit()
 
-# ================== /start ==================
+# ================== START ==================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     if not get_user(chat_id):
         create_user(chat_id)
 
     await update.message.reply_text(
-        "🔥 *Start–Stop aktif*\n\n"
+        "🔥 Start–Stop Bot Aktif\n\n"
         "Bugünkü görev için:\n"
-        "/bugun",
-        parse_mode="Markdown"
+        "/bugun"
     )
 
-# ================== /bugun ==================
+# ================== BUGÜN ==================
 async def bugun(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     user = get_user(chat_id)
     day = user[1]
 
     if day > 21:
-        await update.message.reply_text("🎉 21 gün tamamlandı. Kontrol artık sende.")
+        await update.message.reply_text("🎉 21 gün tamamlandı.")
         return
 
     if day not in PLAN:
         advance_day(chat_id)
-        await update.message.reply_text("🧘 Bugün dinlenme günü. Yarın devam.")
+        await update.message.reply_text("🧘 Bugün dinlenme günü.")
         return
 
     sure = PLAN[day]["sure"]
     durma = PLAN[day]["durma"]
 
     keyboard = InlineKeyboardMarkup([
-        [InlineKeyboardButton("▶️ Başlıyorum", callback_data=f"basla_{sure}")]
+        [InlineKeyboardButton("▶️ Zamanı Başlat", callback_data=f"basla_{sure}")]
     ])
 
     await update.message.reply_text(
         f"""
-━━━━━━━━━━━━━━
-🔥 *START–STOP*
-━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━
+🔥 START–STOP
+━━━━━━━━━━━━━━━━
 
-📅 Gün: *{day}/21*
-⏱ Süre: *{sure} dakika*
+📅 Gün: {day}/21
+⏱ Süre: {sure} dakika
 
-Ne yapacaksın:
-• Yaklaş → *TAM DUR*
-• *{durma}* bekle
-• Nefesi yavaşlat
-• Devam et
+🛑 Yaklaş → DUR  
+⏳ {durma} bekle  
+🫁 Nefesi yavaşlat  
 
-🚫 Porno yok  
-🫁 Acele yok  
-
-_{random.choice(MOTIVE_SOZLER)}_
+"{random.choice(MOTIVE_SOZLER)}"
 
 Hazırsan başla 👇
 """,
-        parse_mode="Markdown",
         reply_markup=keyboard
     )
 
@@ -154,7 +147,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.answer()
     chat_id = query.message.chat.id
 
-    # ▶️ BAŞLA
     if query.data.startswith("basla"):
         sure = int(query.data.split("_")[1])
         start_time = datetime.now()
@@ -167,20 +159,17 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         conn.commit()
 
         await query.edit_message_text(
-            f"▶️ Sayaç başladı\n\n"
-            f"⏱ *{sure} dakika*\n"
-            "Yavaş ol. Kontrol sende.",
-            parse_mode="Markdown"
+            f"▶️ Sayaç başladı\n⏱ {sure} dakika\n\nYavaş ol."
         )
 
-        context.application.job_queue.run_once(
+        # 🔥 JOBQUEUE GARANTİLİ
+        context.job_queue.run_once(
             timer_bitti,
             when=timedelta(minutes=sure),
             chat_id=chat_id,
             name=f"timer_{chat_id}"
         )
 
-    # ⏹ BİTİR
     elif query.data == "bitir":
         user = get_user(chat_id)
         start_time = datetime.fromisoformat(user[2])
@@ -190,23 +179,22 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await query.edit_message_text(
             f"""
-⏹ *GÜN TAMAMLANDI*
+⏹ GÜN TAMAMLANDI
 
-⏱ Süre: *{elapsed} dakika*
+⏱ Süre:
+{elapsed} dakika
 
-Bugün ipler sendeydi 😌
-""",
-            parse_mode="Markdown"
+Kontrol sendeydi.
+"""
         )
 
-# ================== TIMER BİTTİ ==================
+# ================== TIMER ==================
 async def timer_bitti(context: ContextTypes.DEFAULT_TYPE):
     chat_id = context.job.chat_id
 
     await context.bot.send_message(
         chat_id=chat_id,
-        text="⏰ *Süre bitti*\n\nYavaşça bırak.\nHazırsan bitir 👇",
-        parse_mode="Markdown",
+        text="⏰ Süre bitti.\nHazırsan bitir 👇",
         reply_markup=InlineKeyboardMarkup([
             [InlineKeyboardButton("⏹ Bitir", callback_data="bitir")]
         ])
@@ -214,12 +202,18 @@ async def timer_bitti(context: ContextTypes.DEFAULT_TYPE):
 
 # ================== MAIN ==================
 def main():
-    app = ApplicationBuilder().token(TOKEN).build()
+    app = (
+        ApplicationBuilder()
+        .token(TOKEN)
+        .job_queue(JobQueue())
+        .build()
+    )
 
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("bugun", bugun))
     app.add_handler(CallbackQueryHandler(button_handler))
 
+    print("🤖 Bot başlatılıyor...")
     app.run_polling()
 
 if __name__ == "__main__":
